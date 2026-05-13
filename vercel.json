@@ -1,6 +1,6 @@
 {
   "buildCommand": "npx turbo run build --filter=@laundry/web",
   "installCommand": "npm install",
-  "outputDirectory": "apps/web/.next",
+  "outputDirectory": ".next",
   "framework": "nextjs"
 }

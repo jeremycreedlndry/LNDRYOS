@@ -1,0 +1,443 @@
+'use client'
+
+import { useState } from 'react'
+import { Plus, X, Check, Trash2, Pencil, ToggleLeft, ToggleRight, Clock } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { trpc } from '@/lib/trpc'
+import { formatCurrency } from '@/lib/utils'
+import toast from 'react-hot-toast'
+import type { StaffPermissions, StaffRole } from '@laundry/db'
+
+// ─── Permission definitions ───────────────────────────────────────────────────
+
+const PERMISSION_DEFS: { key: keyof StaffPermissions; label: string; description: string }[] = [
+  { key: 'pos',       label: 'POS',         description: 'Create orders and process payments' },
+  { key: 'orders',    label: 'Orders',       description: 'View and manage all orders' },
+  { key: 'customers', label: 'Customers',    description: 'View and edit customer records' },
+  { key: 'reports',   label: 'Reports',      description: 'View sales and activity reports' },
+  { key: 'settings',  label: 'Settings',     description: 'Manage store settings and catalog' },
+  { key: 'staff',     label: 'Staff',        description: 'Invite and manage staff members' },
+  { key: 'equipment', label: 'Equipment',    description: 'View and manage machines' },
+]
+
+const ROLE_LABELS: Record<StaffRole, string> = {
+  owner:   'Owner',
+  manager: 'Manager',
+  staff:   'Staff',
+}
+
+// ─── Invite modal ─────────────────────────────────────────────────────────────
+
+interface InviteForm {
+  display_name: string
+  email: string
+  phone: string
+  role: StaffRole
+  hourly_rate: string
+}
+
+function InviteModal({ onClose }: { onClose: () => void }) {
+  const utils = trpc.useUtils()
+  const [form, setForm] = useState<InviteForm>({
+    display_name: '', email: '', phone: '', role: 'staff', hourly_rate: '',
+  })
+  const set = (k: keyof InviteForm, v: string) => setForm((f) => ({ ...f, [k]: v }))
+
+  const invite = trpc.staff.invite.useMutation({
+    onSuccess: () => { utils.staff.list.invalidate(); toast.success('Invite sent'); onClose() },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const hourly_rate_cents = form.hourly_rate ? Math.round(parseFloat(form.hourly_rate) * 100) : undefined
+    invite.mutate({
+      display_name: form.display_name.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim() || undefined,
+      role: form.role,
+      hourly_rate_cents,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 className="text-base font-semibold text-gray-900">Invite staff member</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4 p-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <Input value={form.display_name} onChange={(e) => set('display_name', e.target.value)}
+              placeholder="Jane Smith" required autoFocus />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)}
+              placeholder="jane@example.com" required />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+              <Input value={form.phone} onChange={(e) => set('phone', e.target.value)}
+                placeholder="(555) 000-0000" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Hourly rate ($)</label>
+              <Input type="number" inputMode="decimal" step="0.01" min="0"
+                value={form.hourly_rate} onChange={(e) => set('hourly_rate', e.target.value)}
+                placeholder="0.00" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+            <div className="flex gap-2">
+              {(['staff', 'manager', 'owner'] as StaffRole[]).map((r) => (
+                <button key={r} type="button" onClick={() => set('role', r)}
+                  className={`flex-1 rounded-lg border-2 py-2 text-sm font-medium transition-colors ${
+                    form.role === r ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}>
+                  {ROLE_LABELS[r]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="text-xs text-gray-400">An invitation email will be sent so they can set their password.</p>
+          <div className="flex gap-2 pt-1">
+            <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
+            <Button type="submit" disabled={invite.isPending} className="flex-1">
+              {invite.isPending ? 'Sending…' : 'Send invite'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ─── Permissions editor ───────────────────────────────────────────────────────
+
+function PermissionsModal({
+  member,
+  onClose,
+}: {
+  member: { id: string; display_name: string; role: StaffRole; permissions: StaffPermissions }
+  onClose: () => void
+}) {
+  const utils = trpc.useUtils()
+  const [perms, setPerms] = useState<StaffPermissions>({ ...member.permissions })
+  const isOwner = member.role === 'owner'
+
+  const update = trpc.staff.update.useMutation({
+    onSuccess: () => { utils.staff.list.invalidate(); toast.success('Permissions saved'); onClose() },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const toggle = (key: keyof StaffPermissions) => {
+    if (isOwner) return
+    setPerms((p) => ({ ...p, [key]: !p[key] }))
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Permissions</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{member.display_name}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="p-4 space-y-1">
+          {isOwner && (
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              Owners have full access to all features.
+            </p>
+          )}
+          {PERMISSION_DEFS.map(({ key, label, description }) => {
+            const enabled = isOwner || !!perms[key]
+            return (
+              <div key={key} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-gray-50">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">{label}</p>
+                  <p className="text-xs text-gray-400">{description}</p>
+                </div>
+                <button onClick={() => toggle(key)} disabled={isOwner}
+                  className={`transition-colors ${enabled ? 'text-brand-600' : 'text-gray-300'} ${isOwner ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-80'}`}>
+                  {enabled ? <ToggleRight className="h-6 w-6" /> : <ToggleLeft className="h-6 w-6" />}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        {!isOwner && (
+          <div className="border-t border-gray-100 px-6 py-4 flex gap-2">
+            <Button variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
+            <Button onClick={() => update.mutate({ id: member.id, permissions: perms })}
+              disabled={update.isPending} className="flex-1">
+              {update.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        )}
+        {isOwner && (
+          <div className="border-t border-gray-100 px-6 py-4">
+            <Button variant="outline" onClick={onClose} className="w-full">Close</Button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Edit member modal ────────────────────────────────────────────────────────
+
+function EditModal({
+  member,
+  onClose,
+}: {
+  member: { id: string; display_name: string; email: string; phone: string | null; role: StaffRole; hourly_rate_cents: number | null }
+  onClose: () => void
+}) {
+  const utils = trpc.useUtils()
+  const [form, setForm] = useState({
+    display_name: member.display_name,
+    phone: member.phone ?? '',
+    role: member.role,
+    hourly_rate: member.hourly_rate_cents !== null ? (member.hourly_rate_cents / 100).toFixed(2) : '',
+  })
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
+
+  const update = trpc.staff.update.useMutation({
+    onSuccess: () => { utils.staff.list.invalidate(); toast.success('Saved'); onClose() },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const hourly_rate_cents = form.hourly_rate ? Math.round(parseFloat(form.hourly_rate) * 100) : null
+    update.mutate({
+      id: member.id,
+      display_name: form.display_name.trim(),
+      phone: form.phone.trim() || null,
+      role: form.role as StaffRole,
+      hourly_rate_cents,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 className="text-base font-semibold text-gray-900">Edit staff member</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4 p-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <Input value={form.display_name} onChange={(e) => set('display_name', e.target.value)} required autoFocus />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+              <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="(555) 000-0000" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Hourly rate ($)</label>
+              <Input type="number" inputMode="decimal" step="0.01" min="0"
+                value={form.hourly_rate} onChange={(e) => set('hourly_rate', e.target.value)} placeholder="0.00" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+            <div className="flex gap-2">
+              {(['staff', 'manager', 'owner'] as StaffRole[]).map((r) => (
+                <button key={r} type="button" onClick={() => set('role', r)}
+                  className={`flex-1 rounded-lg border-2 py-2 text-sm font-medium transition-colors ${
+                    form.role === r ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}>
+                  {ROLE_LABELS[r]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
+            <Button type="submit" disabled={update.isPending} className="flex-1">
+              {update.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ─── Time entries drawer ──────────────────────────────────────────────────────
+
+function TimeEntriesModal({
+  member,
+  onClose,
+}: {
+  member: { user_id: string; display_name: string }
+  onClose: () => void
+}) {
+  const { data: entries = [], isLoading } = trpc.staff.timeEntries.useQuery({ user_id: member.user_id })
+
+  const fmtDate = (s: string) => new Date(s).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
+  const fmtTime = (s: string) => new Date(s).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' })
+
+  const calcHours = (inAt: string, outAt: string | null) => {
+    if (!outAt) return null
+    return ((new Date(outAt).getTime() - new Date(inAt).getTime()) / 3600000).toFixed(1)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Time entries</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{member.display_name}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-4">
+          {isLoading ? (
+            <p className="text-sm text-gray-400 text-center py-8">Loading…</p>
+          ) : entries.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">No time entries yet.</p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {entries.map((e) => (
+                <div key={e.id} className="flex items-center gap-3 py-2.5 px-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{fmtDate(e.clocked_in_at)}</p>
+                    <p className="text-xs text-gray-400">
+                      {fmtTime(e.clocked_in_at)} → {e.clocked_out_at ? fmtTime(e.clocked_out_at) : <span className="text-green-600 font-medium">Active</span>}
+                    </p>
+                  </div>
+                  <div className="text-sm font-semibold text-gray-700 tabular-nums">
+                    {calcHours(e.clocked_in_at, e.clocked_out_at) !== null
+                      ? `${calcHours(e.clocked_in_at, e.clocked_out_at)}h`
+                      : <span className="text-green-600">In</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="border-t border-gray-100 px-6 py-4">
+          <Button variant="outline" onClick={onClose} className="w-full">Close</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Staff tab ────────────────────────────────────────────────────────────────
+
+export function StaffTab() {
+  const utils = trpc.useUtils()
+  const { data: members = [], isLoading } = trpc.staff.list.useQuery()
+  const [showInvite, setShowInvite] = useState(false)
+  const [editingPerms, setEditingPerms] = useState<typeof members[0] | null>(null)
+  const [editingMember, setEditingMember] = useState<typeof members[0] | null>(null)
+  const [viewingTime, setViewingTime] = useState<typeof members[0] | null>(null)
+  const [removeConfirm, setRemoveConfirm] = useState<string | null>(null)
+
+  const removeMember = trpc.staff.remove.useMutation({
+    onSuccess: () => { utils.staff.list.invalidate(); setRemoveConfirm(null); toast.success('Removed') },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const toggleActive = trpc.staff.update.useMutation({
+    onSuccess: () => utils.staff.list.invalidate(),
+    onError: (e) => toast.error(e.message),
+  })
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Staff & Users</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Manage team members, roles, and permissions</p>
+        </div>
+        <Button onClick={() => setShowInvite(true)} size="sm" className="gap-1.5">
+          <Plus className="h-4 w-4" /> Invite
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <p className="text-sm text-gray-400">Loading…</p>
+      ) : members.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-200 px-4 py-6 text-center">
+          <p className="text-sm text-gray-400">No staff yet. <button onClick={() => setShowInvite(true)} className="text-brand-600 hover:underline">Invite someone</button></p>
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white overflow-hidden">
+          {members.map((m) => (
+            <div key={m.id} className="flex items-center gap-3 px-4 py-3">
+              {/* Avatar */}
+              <div className="h-9 w-9 rounded-full bg-brand-100 flex items-center justify-center shrink-0">
+                <span className="text-sm font-semibold text-brand-700">
+                  {m.display_name.charAt(0).toUpperCase()}
+                </span>
+              </div>
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className={`text-sm font-medium ${m.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
+                    {m.display_name}
+                  </p>
+                  <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                    {ROLE_LABELS[m.role as StaffRole]}
+                  </span>
+                  {!m.is_active && (
+                    <span className="text-xs text-red-400 bg-red-50 px-1.5 py-0.5 rounded">Inactive</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 truncate">{m.email}{m.hourly_rate_cents ? ` · ${formatCurrency(m.hourly_rate_cents)}/hr` : ''}</p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-1">
+                <button onClick={() => setViewingTime(m)} className="text-gray-400 hover:text-gray-600 p-1" title="Time entries">
+                  <Clock className="h-4 w-4" />
+                </button>
+                <button onClick={() => setEditingPerms(m)} className="text-xs font-medium text-brand-600 hover:text-brand-700 px-2 py-1">
+                  Perms
+                </button>
+                <button onClick={() => setEditingMember(m)} className="text-gray-400 hover:text-gray-600 p-1">
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button onClick={() => toggleActive.mutate({ id: m.id, is_active: !m.is_active })}
+                  className={`transition-colors p-0.5 ${m.is_active ? 'text-brand-600 hover:text-brand-700' : 'text-gray-300 hover:text-gray-400'}`}>
+                  {m.is_active ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}
+                </button>
+                {removeConfirm === m.id ? (
+                  <div className="flex items-center gap-1 ml-1">
+                    <button onClick={() => removeMember.mutate({ id: m.id })} className="text-red-500"><Check className="h-4 w-4" /></button>
+                    <button onClick={() => setRemoveConfirm(null)} className="text-gray-400"><X className="h-4 w-4" /></button>
+                  </div>
+                ) : (
+                  <button onClick={() => setRemoveConfirm(m.id)} className="text-gray-300 hover:text-red-500 p-1">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showInvite   && <InviteModal onClose={() => setShowInvite(false)} />}
+      {editingPerms && <PermissionsModal member={editingPerms} onClose={() => setEditingPerms(null)} />}
+      {editingMember && <EditModal member={editingMember} onClose={() => setEditingMember(null)} />}
+      {viewingTime  && <TimeEntriesModal member={viewingTime} onClose={() => setViewingTime(null)} />}
+    </div>
+  )
+}

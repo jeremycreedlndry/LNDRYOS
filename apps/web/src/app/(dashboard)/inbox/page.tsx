@@ -62,8 +62,8 @@ export default function InboxPage() {
   const [draft, setDraft] = useState('')
   const threadRef = useRef<HTMLDivElement>(null)
 
-  const { data: inbox = [], refetch: refetchInbox, isLoading: inboxLoading } = trpc.messages.inbox.useQuery()
-  const { data: thread = [], refetch: refetchThread } = trpc.messages.listForCustomer.useQuery(
+  const { data: inbox = [], isLoading: inboxLoading } = trpc.messages.inbox.useQuery()
+  const { data: thread = [] } = trpc.messages.listForCustomer.useQuery(
     { customer_id: selectedId! },
     { enabled: !!selectedId }
   )
@@ -71,15 +71,15 @@ export default function InboxPage() {
   const markRead = trpc.messages.markRead.useMutation({
     onSuccess: () => {
       utils.messages.unreadCount.invalidate()
-      refetchInbox()
+      utils.messages.inbox.invalidate()
     },
   })
 
   const sendSms = trpc.messages.sendSms.useMutation({
     onSuccess: () => {
       setDraft('')
-      refetchThread()
-      refetchInbox()
+      utils.messages.listForCustomer.invalidate({ customer_id: selectedId! })
+      utils.messages.inbox.invalidate()
     },
     onError: (e) => toast.error(e.message),
   })
@@ -90,8 +90,8 @@ export default function InboxPage() {
     const channel = supabase
       .channel('inbox-realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
-        refetchInbox()
-        if (selectedId) refetchThread()
+        utils.messages.inbox.invalidate()
+        if (selectedId) utils.messages.listForCustomer.invalidate({ customer_id: selectedId })
         utils.messages.unreadCount.invalidate()
       })
       .subscribe()
@@ -146,7 +146,7 @@ export default function InboxPage() {
       <aside className="w-72 shrink-0 border-r border-gray-200 bg-white flex flex-col">
         <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
           <h1 className="text-sm font-semibold text-gray-900">Inbox</h1>
-          <button onClick={() => refetchInbox()}
+          <button onClick={() => utils.messages.inbox.invalidate()}
             className="text-gray-400 hover:text-gray-600 transition-colors">
             <RefreshCw className="h-3.5 w-3.5" />
           </button>

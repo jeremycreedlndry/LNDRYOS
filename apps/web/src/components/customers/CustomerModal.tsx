@@ -202,7 +202,12 @@ function MessagesSection({ customerId }: { customerId: string }) {
     onSuccess: () => utils.messages.unreadCount.invalidate(),
   })
   const sendSms = trpc.messages.sendSms.useMutation({
-    onSuccess: () => { setDraft(''); refetch(); utils.messages.unreadCount.invalidate() },
+    onSuccess: () => {
+      setDraft('')
+      refetch()
+      utils.messages.unreadCount.invalidate()
+      utils.messages.inbox.invalidate()
+    },
     onError: (e) => toast.error(e.message),
   })
 

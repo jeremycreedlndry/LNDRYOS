@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { X, CalendarDays, Truck, MapPin } from 'lucide-react'
 import { CustomerSearch } from '@/components/pos/CustomerSearch'
+import { AddressAutocomplete } from '@/components/ui/AddressAutocomplete'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { trpc } from '@/lib/trpc'
@@ -19,7 +20,7 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
   const [scheduledDate, setScheduledDate] = useState('')
   const [notes, setNotes] = useState('')
 
-  // Address fields — auto-populated from customer, editable
+  // Address — street uses Google Places autocomplete
   const [street, setStreet] = useState('')
   const [apt, setApt] = useState('')
   const [city, setCity] = useState('')
@@ -34,7 +35,6 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
   }, [customer])
 
   const utils = trpc.useUtils()
-
   const updateCustomer = trpc.customers.update.useMutation()
 
   const createPickup = trpc.orders.createPickup.useMutation({
@@ -47,35 +47,31 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
     onError: (e) => toast.error(e.message),
   })
 
-  const handleSelectCustomer = (c: Customer | null) => {
-    setCustomer(c)
-  }
-
   const handleSubmit = () => {
     if (!customer) { toast.error('Please select a customer'); return }
     if (!street.trim()) { toast.error('Pickup address is required'); return }
 
-    // If address changed from what's on the customer, save it back
+    // Save updated address back to customer if changed
     const addressChanged =
       street.trim() !== (customer.address_street ?? '') ||
-      apt.trim() !== (customer.address_apt ?? '') ||
-      city.trim() !== (customer.address_city ?? '') ||
+      apt.trim()    !== (customer.address_apt ?? '') ||
+      city.trim()   !== (customer.address_city ?? '') ||
       postal.trim() !== (customer.address_postal_code ?? '')
 
     if (addressChanged) {
       updateCustomer.mutate({
         id: customer.id,
-        address_street: street.trim() || null,
-        address_apt: apt.trim() || null,
-        address_city: city.trim() || null,
-        address_postal_code: postal.trim() || null,
+        address_street:       street.trim() || null,
+        address_apt:          apt.trim() || null,
+        address_city:         city.trim() || null,
+        address_postal_code:  postal.trim() || null,
       })
     }
 
     createPickup.mutate({
-      customer_id: customer.id,
-      scheduled_date: scheduledDate || null,
-      notes: notes.trim() || null,
+      customer_id:      customer.id,
+      scheduled_date:   scheduledDate || null,
+      notes:            notes.trim() || null,
     })
   }
 
@@ -101,12 +97,13 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
 
         {/* Body */}
         <div className="px-6 py-5 space-y-5">
+
           {/* Customer */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
               Customer <span className="text-red-500">*</span>
             </label>
-            <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
+            <CustomerSearch selected={customer} onSelect={setCustomer} />
           </div>
 
           {/* Pickup Address */}
@@ -118,18 +115,22 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
               </span>
             </label>
             <div className="space-y-2">
-              <Input
+              <AddressAutocomplete
                 value={street}
-                onChange={(e) => setStreet(e.target.value)}
-                placeholder="Street address"
-                className="text-sm"
+                onChange={setStreet}
+                onSelect={(fields) => {
+                  setStreet(fields.street)
+                  setCity(fields.city)
+                  setPostal(fields.postal_code)
+                }}
+                placeholder="Start typing address…"
               />
               <div className="flex gap-2">
                 <Input
                   value={apt}
                   onChange={(e) => setApt(e.target.value)}
-                  placeholder="Apt / Unit (optional)"
-                  className="text-sm w-32 shrink-0"
+                  placeholder="Apt / Unit"
+                  className="text-sm w-28 shrink-0"
                 />
                 <Input
                   value={city}

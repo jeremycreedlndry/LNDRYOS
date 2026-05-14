@@ -2,12 +2,13 @@
 
 import { useState, useCallback, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { X, ShoppingCart, ArrowLeft } from 'lucide-react'
+import { X, ShoppingCart, ArrowLeft, Truck } from 'lucide-react'
 import { CustomerSearch } from '@/components/pos/CustomerSearch'
 import { ServiceGrid } from '@/components/pos/ServiceGrid'
 import { OrderCart, type CartLine } from '@/components/pos/OrderCart'
 import { PaymentModal } from '@/components/pos/PaymentModal'
 import { BagEntryModal } from '@/components/pos/BagEntryModal'
+import { SchedulePickupModal } from '@/components/pos/SchedulePickupModal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { trpc } from '@/lib/trpc'
@@ -120,6 +121,7 @@ function POSInner() {
   const [giftCardPrompt, setGiftCardPrompt] = useState<ServiceItem | null>(null)
   const [bagEntryItem, setBagEntryItem] = useState<ServiceItem | null>(null)
   const [mobileCartOpen, setMobileCartOpen] = useState(false)
+  const [schedulePickupOpen, setSchedulePickupOpen] = useState(false)
   const [initialized, setInitialized] = useState(false)
 
   // Load existing order when in edit mode
@@ -275,7 +277,18 @@ function POSInner() {
       <div className="hidden lg:flex h-[calc(100vh-4rem)] gap-0" style={isEditMode ? { height: 'calc(100vh - 4rem - 2.25rem)' } : {}}>
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 border-r border-gray-200">
           <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Customer</h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Customer</h2>
+              {!isEditMode && (
+                <button
+                  onClick={() => setSchedulePickupOpen(true)}
+                  className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+                >
+                  <Truck className="h-3.5 w-3.5" />
+                  Schedule Pickup
+                </button>
+              )}
+            </div>
             <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
           </div>
           <div>
@@ -305,6 +318,15 @@ function POSInner() {
       {/* ── Mobile layout ───────────────────────────────────────────────────── */}
       <div className="flex lg:hidden flex-col h-[calc(100dvh-4rem-4rem)]">
         <div className="flex-1 overflow-y-auto p-3 space-y-3 pb-20">
+          {!isEditMode && (
+            <button
+              onClick={() => setSchedulePickupOpen(true)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-brand-200 bg-brand-50 py-2.5 text-sm font-medium text-brand-700 hover:bg-brand-100"
+            >
+              <Truck className="h-4 w-4" />
+              Schedule Pickup
+            </button>
+          )}
           <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
           <ServiceGrid onAddItem={handleAddItem} activeCategory={activeCategory}
             onCategoryChange={setActiveCategory} priceListId={activePriceListId} />
@@ -357,6 +379,12 @@ function POSInner() {
               customer={customer} onComplete={handlePaymentComplete} onCancel={() => setPaymentOrderId(null)} />
           </div>
         </div>
+      )}
+
+      {schedulePickupOpen && (
+        <SchedulePickupModal
+          onClose={() => setSchedulePickupOpen(false)}
+        />
       )}
     </>
   )

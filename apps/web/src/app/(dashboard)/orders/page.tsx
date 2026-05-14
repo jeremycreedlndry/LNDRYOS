@@ -58,6 +58,7 @@ interface OrderRow {
 
 const STATUS_FILTERS: { label: string; value: OrderStatus | undefined }[] = [
   { label: 'All',       value: undefined },
+  { label: 'Pending',   value: 'pending' },
   { label: 'Cleaning',  value: 'cleaning' },
   { label: 'Ready',     value: 'ready' },
   { label: 'Picked Up', value: 'picked_up' },

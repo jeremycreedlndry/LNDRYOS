@@ -141,6 +141,51 @@ export const ordersRouter = router({
       return order
     }),
 
+  // Create a shell pickup order (no lines, status = pending)
+  createPickup: tenantProcedure
+    .input(z.object({
+      customer_id: z.string().uuid(),
+      scheduled_date: z.string().nullable().optional(), // ISO date string
+      notes: z.string().nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { data: lastOrder } = await ctx.supabase
+        .from('orders')
+        .select('order_number')
+        .eq('tenant_id', ctx.tenantId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      let nextNum = 1
+      if (lastOrder?.order_number) {
+        const match = lastOrder.order_number.match(/(\d+)$/)
+        if (match) nextNum = parseInt(match[1]) + 1
+      }
+      const orderNumber = `ORD-${String(nextNum).padStart(5, '0')}`
+
+      const { data: order, error } = await ctx.supabase
+        .from('orders')
+        .insert({
+          tenant_id: ctx.tenantId,
+          order_number: orderNumber,
+          customer_id: input.customer_id,
+          status: 'pending',
+          notes: input.notes ?? null,
+          due_date: input.scheduled_date ?? null,
+          subtotal: 0,
+          tax_amount: 0,
+          discount_amount: 0,
+          total_amount: 0,
+          created_by: ctx.userId,
+        })
+        .select()
+        .single()
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return order
+    }),
+
   // Replace lines on an existing open order and recalculate totals
   updateOrder: tenantProcedure
     .input(z.object({
@@ -189,6 +234,9 @@ export const ordersRouter = router({
       const { error: linesErr } = await ctx.supabase.from('order_lines').insert(lines)
       if (linesErr) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: linesErr.message })
 
+      // If detailing a pending pickup, advance status to cleaning
+      const newStatus = existing.status === 'pending' ? 'cleaning' : existing.status
+
       const { data: updated, error: updateErr } = await ctx.supabase
         .from('orders')
         .update({
@@ -198,6 +246,7 @@ export const ordersRouter = router({
           tax_amount: taxAmount,
           discount_amount: input.discount_amount,
           total_amount: total,
+          status: newStatus,
           updated_at: new Date().toISOString(),
         })
         .eq('id', input.id)
@@ -206,6 +255,12 @@ export const ordersRouter = router({
         .single()
 
       if (updateErr) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: updateErr.message })
+
+      // Send order-created notifications when detailing a previously pending pickup
+      if (existing.status === 'pending' && input.customer_id) {
+        sendOrderCreatedEmail(ctx.supabase, ctx.tenantId, updated, input.lines).catch(console.error)
+      }
+
       return updated
     }),
 

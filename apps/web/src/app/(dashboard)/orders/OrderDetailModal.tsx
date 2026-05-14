@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react'
 import Link from 'next/link'
-import { X, WashingMachine, Wind, FoldVertical, Mail, Receipt, Send, Trash2 } from 'lucide-react'
+import { X, WashingMachine, Wind, FoldVertical, Mail, Receipt, Send, Trash2, Truck } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { formatCurrency, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -100,6 +100,7 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
   }
 
   const canEdit = order && order.status !== 'picked_up' && order.status !== 'delivered' && order.status !== 'cancelled'
+  const isPending = order?.status === 'pending'
 
   type Payment = { id: string; amount: number; method: string; status: string; processed_by: string; processed_at: string }
   type Line    = { id: string; name: string; category: string; quantity: number; unit_label: string; unit_price: number; notes?: string | null }
@@ -117,11 +118,21 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 shrink-0">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold text-gray-900">
               {isLoading ? 'Loading…' : `Order ${order?.order_number}`}
             </h2>
-            {canEdit && order && (
+            {isPending && order && (
+              <Link
+                href={`/pos?orderId=${order.id}`}
+                onClick={onClose}
+                className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
+              >
+                <Truck className="h-3.5 w-3.5" />
+                Detail Order
+              </Link>
+            )}
+            {canEdit && !isPending && order && (
               <Link
                 href={`/pos?orderId=${order.id}`}
                 onClick={onClose}
@@ -142,6 +153,19 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
 
           {order && (
             <>
+              {/* Pending pickup notice */}
+              {isPending && (
+                <div className="flex items-start gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
+                  <Truck className="h-5 w-5 text-brand-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-brand-900">Awaiting laundry drop-off</p>
+                    <p className="text-xs text-brand-700 mt-0.5">
+                      When the laundry arrives, tap <strong>Detail Order</strong> above to add services and start cleaning.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Meta: Created / Payment / Timestamps */}
               <div className="grid grid-cols-3 gap-4">
                 <div>

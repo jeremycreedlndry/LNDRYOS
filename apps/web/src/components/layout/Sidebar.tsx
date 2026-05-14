@@ -9,7 +9,7 @@ import {
   BarChart2,
   Settings,
   Shirt,
-  WashingMachine,
+  Workflow,
   Truck,
   MessageSquare,
 } from 'lucide-react'
@@ -20,7 +20,7 @@ import { trpc } from '@/lib/trpc'
 const NAV = [
   { href: '/pos',       label: 'POS',       icon: ShoppingCart },
   { href: '/orders',    label: 'Orders',    icon: ClipboardList },
-  { href: '/machines',  label: 'Machines',  icon: WashingMachine },
+  { href: '/workflow',  label: 'Workflow',  icon: Workflow },
   { href: '/pickups',   label: 'Pickups',   icon: Truck },
   { href: '/customers', label: 'Customers', icon: Users },
   { href: '/inbox',     label: 'Inbox',     icon: MessageSquare, badge: true },

@@ -2,14 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ShoppingCart, ClipboardList, Users, Settings, WashingMachine, Truck, MessageSquare } from 'lucide-react'
+import { ShoppingCart, ClipboardList, Users, Settings, Workflow, Truck, MessageSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc'
 
 const NAV = [
   { href: '/pos',       label: 'POS',      icon: ShoppingCart },
   { href: '/orders',    label: 'Orders',   icon: ClipboardList },
-  { href: '/machines',  label: 'Machines', icon: WashingMachine },
+  { href: '/workflow',  label: 'Workflow', icon: Workflow },
   { href: '/pickups',   label: 'Pickups',  icon: Truck },
   { href: '/inbox',     label: 'Inbox',    icon: MessageSquare, badge: true },
   { href: '/customers', label: 'Customers',icon: Users },

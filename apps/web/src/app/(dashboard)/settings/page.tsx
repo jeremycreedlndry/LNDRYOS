@@ -552,7 +552,7 @@ function ServicesTab() {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type Tab = 'services' | 'store' | 'preferences' | 'machines' | 'folding' | 'integrations' | 'zones' | 'staff'
+type Tab = 'services' | 'store' | 'preferences' | 'machines' | 'folding' | 'integrations' | 'delivery' | 'staff'
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('services')
@@ -560,7 +560,7 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-2xl px-6 py-8">
       <h1 className="text-xl font-bold text-gray-900 mb-6">Settings</h1>
       <div className="mb-6 flex gap-1 rounded-lg bg-gray-100 p-1 w-fit flex-wrap">
-        {([['services', 'Services'], ['store', 'Store'], ['preferences', 'Preferences'], ['machines', 'Machines'], ['folding', 'Folding/Packing'], ['zones', 'Zones'], ['integrations', 'Integrations'], ['staff', 'Staff']] as [Tab, string][]).map(([value, label]) => (
+        {([['services', 'Services'], ['store', 'Store'], ['preferences', 'Preferences'], ['machines', 'Machines'], ['folding', 'Folding/Packing'], ['delivery', 'Delivery'], ['integrations', 'Integrations'], ['staff', 'Staff']] as [Tab, string][]).map(([value, label]) => (
           <button key={value} onClick={() => setTab(value)}
             className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${tab === value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
@@ -572,7 +572,7 @@ export default function SettingsPage() {
       {tab === 'preferences' && <PreferencesTab />}
       {tab === 'machines'    && <MachinesTab />}
       {tab === 'folding'     && <FoldingPackingTab />}
-      {tab === 'zones'       && <ZonesTab />}
+      {tab === 'delivery'    && <ZonesTab />}
       {tab === 'integrations' && <IntegrationsTab />}
       {tab === 'staff'       && <StaffTab />}
     </div>

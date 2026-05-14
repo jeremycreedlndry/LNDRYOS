@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { X, CalendarDays, Truck } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { X, CalendarDays, Truck, MapPin } from 'lucide-react'
 import { CustomerSearch } from '@/components/pos/CustomerSearch'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,23 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
   const [scheduledDate, setScheduledDate] = useState('')
   const [notes, setNotes] = useState('')
 
+  // Address fields — auto-populated from customer, editable
+  const [street, setStreet] = useState('')
+  const [apt, setApt] = useState('')
+  const [city, setCity] = useState('')
+  const [postal, setPostal] = useState('')
+
+  // When customer changes, populate address from their profile
+  useEffect(() => {
+    setStreet(customer?.address_street ?? '')
+    setApt(customer?.address_apt ?? '')
+    setCity(customer?.address_city ?? '')
+    setPostal(customer?.address_postal_code ?? '')
+  }, [customer])
+
   const utils = trpc.useUtils()
+
+  const updateCustomer = trpc.customers.update.useMutation()
 
   const createPickup = trpc.orders.createPickup.useMutation({
     onSuccess: (order) => {
@@ -31,8 +47,31 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
     onError: (e) => toast.error(e.message),
   })
 
+  const handleSelectCustomer = (c: Customer | null) => {
+    setCustomer(c)
+  }
+
   const handleSubmit = () => {
     if (!customer) { toast.error('Please select a customer'); return }
+    if (!street.trim()) { toast.error('Pickup address is required'); return }
+
+    // If address changed from what's on the customer, save it back
+    const addressChanged =
+      street.trim() !== (customer.address_street ?? '') ||
+      apt.trim() !== (customer.address_apt ?? '') ||
+      city.trim() !== (customer.address_city ?? '') ||
+      postal.trim() !== (customer.address_postal_code ?? '')
+
+    if (addressChanged) {
+      updateCustomer.mutate({
+        id: customer.id,
+        address_street: street.trim() || null,
+        address_apt: apt.trim() || null,
+        address_city: city.trim() || null,
+        address_postal_code: postal.trim() || null,
+      })
+    }
+
     createPickup.mutate({
       customer_id: customer.id,
       scheduled_date: scheduledDate || null,
@@ -40,9 +79,12 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
     })
   }
 
+  const isSubmitting = createPickup.isPending || updateCustomer.isPending
+  const canSubmit = !!customer && !!street.trim()
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl overflow-y-auto max-h-[90vh]">
 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
@@ -64,7 +106,48 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
             <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
               Customer <span className="text-red-500">*</span>
             </label>
-            <CustomerSearch selected={customer} onSelect={setCustomer} />
+            <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
+          </div>
+
+          {/* Pickup Address */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+              <span className="flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5" />
+                Pickup Address <span className="text-red-500">*</span>
+              </span>
+            </label>
+            <div className="space-y-2">
+              <Input
+                value={street}
+                onChange={(e) => setStreet(e.target.value)}
+                placeholder="Street address"
+                className="text-sm"
+              />
+              <div className="flex gap-2">
+                <Input
+                  value={apt}
+                  onChange={(e) => setApt(e.target.value)}
+                  placeholder="Apt / Unit (optional)"
+                  className="text-sm w-32 shrink-0"
+                />
+                <Input
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="City"
+                  className="text-sm flex-1"
+                />
+                <Input
+                  value={postal}
+                  onChange={(e) => setPostal(e.target.value)}
+                  placeholder="Postal code"
+                  className="text-sm w-28 shrink-0"
+                />
+              </div>
+            </div>
+            {customer && !street.trim() && (
+              <p className="text-xs text-amber-600 mt-1.5">No address on file — please enter one above.</p>
+            )}
           </div>
 
           {/* Date */}
@@ -91,8 +174,8 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              placeholder="e.g. 2 bags, extra delicates…"
+              rows={2}
+              placeholder="e.g. 2 bags, extra delicates, ring buzzer…"
               className="w-full resize-none rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 leading-relaxed"
             />
           </div>
@@ -108,7 +191,7 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button
             onClick={handleSubmit}
-            disabled={!customer || createPickup.isPending}
+            disabled={!canSubmit || isSubmitting}
             className="gap-1.5"
           >
             <Truck className="h-4 w-4" />

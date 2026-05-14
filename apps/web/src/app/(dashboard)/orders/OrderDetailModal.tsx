@@ -110,7 +110,11 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
   const lines       = (order?.lines      as Line[]    | undefined) ?? []
   const assignments = (order?.assignments as Assign[] | undefined) ?? []
 
-  const customer = order?.customer as { first_name: string; last_name: string; phone?: string | null } | null
+  const customer = order?.customer as {
+    first_name: string; last_name: string; phone?: string | null
+    address_street?: string | null; address_apt?: string | null
+    address_city?: string | null; address_postal_code?: string | null
+  } | null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -157,9 +161,15 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
               {isPending && (
                 <div className="flex items-start gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
                   <Truck className="h-5 w-5 text-brand-600 shrink-0 mt-0.5" />
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-brand-900">Awaiting laundry drop-off</p>
-                    <p className="text-xs text-brand-700 mt-0.5">
+                    {customer?.address_street ? (
+                      <p className="text-xs text-brand-700 mt-0.5">
+                        {[customer.address_street, customer.address_apt, customer.address_city, customer.address_postal_code]
+                          .filter(Boolean).join(', ')}
+                      </p>
+                    ) : null}
+                    <p className="text-xs text-brand-600 mt-1">
                       When the laundry arrives, tap <strong>Detail Order</strong> above to add services and start cleaning.
                     </p>
                   </div>

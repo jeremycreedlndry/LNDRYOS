@@ -183,6 +183,19 @@ export const ordersRouter = router({
         .single()
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+
+      // Create a pickup_stop so it appears on the /pickups dispatch board
+      const stopDate = input.scheduled_date ?? new Date().toISOString().split('T')[0]
+      await ctx.supabase.from('pickup_stops').insert({
+        tenant_id: ctx.tenantId,
+        customer_id: input.customer_id,
+        order_id: order.id,
+        type: 'pickup',
+        scheduled_date: stopDate,
+        status: 'pending',
+        notes: input.notes ?? null,
+      })
+
       return order
     }),
 

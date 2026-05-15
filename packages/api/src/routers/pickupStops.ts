@@ -138,16 +138,22 @@ export const pickupStopsRouter = router({
       customer_id:    z.string().uuid(),
       type:           z.enum(['pickup', 'delivery']),
       scheduled_date: z.string(),
+      status:         z.enum(['pending', 'en_route', 'completed', 'failed', 'skipped']).optional(),
       time_start:     z.string().nullable().optional(),
       time_end:       z.string().nullable().optional(),
       zone_id:        z.string().uuid().nullable().optional(),
       driver_user_id: z.string().uuid().nullable().optional(),
+      order_id:       z.string().uuid().nullable().optional(),
       notes:          z.string().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('pickup_stops')
-        .insert({ ...input, tenant_id: ctx.tenantId })
+        .insert({
+          ...input,
+          tenant_id: ctx.tenantId,
+          completed_at: input.status === 'completed' ? new Date().toISOString() : null,
+        })
         .select(`*, customer:customers(id, first_name, last_name, phone, address_street, address_city)`)
         .single()
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })

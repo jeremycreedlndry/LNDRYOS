@@ -127,7 +127,7 @@ function StopCard({ stop, onStatusChange }: {
           )}
           <button onClick={() => onStatusChange(stop.id, 'completed', stop.customer)}
             className="flex-1 rounded-lg border border-green-200 bg-green-50 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100">
-            <Check className="inline h-3 w-3 mr-1" />Done
+            <Check className="inline h-3 w-3 mr-1" />{stop.type === 'delivery' ? 'Delivered' : 'Picked Up'}
           </button>
           <button onClick={() => onStatusChange(stop.id, 'skipped', stop.customer)}
             className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-400 hover:bg-gray-50">

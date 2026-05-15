@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, tenantProcedure } from '../trpc'
+import { sendSms, logMessage } from '../lib/sms'
+import { sendEmail, emailLayout } from '../lib/email'
 
 export const pickupStopsRouter = router({
   listByDate: tenantProcedure
@@ -122,6 +124,11 @@ export const pickupStopsRouter = router({
           .eq('tenant_id', ctx.tenantId)
       }
 
+      // Notify customer when driver goes en route
+      if (input.status === 'en_route' && data.customer_id) {
+        sendEnRouteNotification(ctx.supabase, ctx.tenantId, data).catch(console.error)
+      }
+
       return data
     }),
 
@@ -147,3 +154,57 @@ export const pickupStopsRouter = router({
       return data
     }),
 })
+
+// ─── En-route notification (fire-and-forget) ──────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function sendEnRouteNotification(supabase: any, tenantId: string, stop: any) {
+  const { data: customer } = await supabase
+    .from('customers')
+    .select('first_name, last_name, phone, email, notification_preference')
+    .eq('id', stop.customer_id)
+    .single()
+  if (!customer) return
+
+  const pref: string = customer.notification_preference ?? 'sms_email'
+  if (pref === 'none') return
+
+  const { data: tenant } = await supabase.from('tenants').select('name, settings').eq('id', tenantId).single()
+  const storeName: string = tenant?.name ?? 'Your laundry service'
+  const storePhone: string | null = (tenant?.settings as Record<string, unknown>)?.phone as string ?? null
+
+  const action = stop.type === 'delivery' ? 'deliver your laundry' : 'pick up your laundry'
+  const actionShort = stop.type === 'delivery' ? 'delivery' : 'pickup'
+
+  if ((pref === 'sms' || pref === 'sms_email') && customer.phone) {
+    const body = `${storeName}: Your driver is on the way to ${action}! They should arrive shortly.`
+    await sendSms(customer.phone, body)
+    await logMessage(supabase, {
+      tenant_id: tenantId,
+      customer_id: stop.customer_id,
+      direction: 'outbound',
+      channel: 'sms',
+      body,
+      to_address: customer.phone,
+    })
+  }
+
+  if ((pref === 'email' || pref === 'sms_email') && customer.email) {
+    const subject = `Your driver is on the way — ${actionShort} today`
+    const html = emailLayout(storeName, `
+      <p>Hi ${customer.first_name},</p>
+      <p>Your driver is <strong>on the way</strong> to ${action}. They should arrive shortly — please make sure your laundry is ready and accessible.</p>
+      ${storePhone ? `<p style="font-size:13px;color:#6b7280">Questions? Call us at ${storePhone}</p>` : ''}
+    `)
+    await sendEmail({ to: customer.email, subject, html })
+    await logMessage(supabase, {
+      tenant_id: tenantId,
+      customer_id: stop.customer_id,
+      direction: 'outbound',
+      channel: 'email',
+      body: `Your driver is on the way to ${action}.`,
+      subject,
+      to_address: customer.email,
+    })
+  }
+}

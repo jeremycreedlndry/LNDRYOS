@@ -506,9 +506,14 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
           </button>
           {canEdit && (
             <Link href={`/pos?orderId=${order.id}`}
-              className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors whitespace-nowrap">
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap',
+                order.status === 'pending'
+                  ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                  : 'border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+              )}>
               <Pencil className="h-3 w-3" />
-              Edit
+              {order.status === 'pending' ? 'Detail' : 'Edit'}
             </Link>
           )}
           {/* Status buttons */}

@@ -147,6 +147,7 @@ export const ordersRouter = router({
       customer_id: z.string().uuid(),
       scheduled_date: z.string().nullable().optional(), // ISO date string
       notes: z.string().nullable().optional(),
+      skip_stop: z.boolean().optional(), // caller will create the stop themselves
     }))
     .mutation(async ({ ctx, input }) => {
       const { data: lastOrder } = await ctx.supabase
@@ -185,6 +186,7 @@ export const ordersRouter = router({
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
 
       // Create a pickup_stop so it appears on the /pickups dispatch board
+      if (input.skip_stop) return order
       const stopDate = input.scheduled_date ?? new Date().toISOString().split('T')[0]
       await ctx.supabase.from('pickup_stops').insert({
         tenant_id: ctx.tenantId,

@@ -135,7 +135,7 @@ function StopCard({ stop, onStatusChange }: {
           </button>
         </div>
       )}
-      {stop.status === 'completed' && (
+      {(stop.status === 'completed' || stop.status === 'skipped') && (
         <button onClick={() => onStatusChange(stop.id, 'pending', stop.customer)}
           className="text-xs text-gray-400 hover:text-gray-600">
           <RotateCcw className="inline h-3 w-3 mr-1" />Undo
@@ -208,8 +208,10 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
     updateStatus.mutate({ id, status: validStatus })
   }
 
-  const pickups    = (stops as typeof stops).filter((s) => s.type === 'pickup')
-  const deliveries = (stops as typeof stops).filter((s) => s.type === 'delivery')
+  const [skippedOpen, setSkippedOpen] = useState(false)
+  const pickups    = (stops as typeof stops).filter((s) => s.type === 'pickup'  && s.status !== 'skipped')
+  const deliveries = (stops as typeof stops).filter((s) => s.type === 'delivery' && s.status !== 'skipped')
+  const skipped    = (stops as typeof stops).filter((s) => s.status === 'skipped')
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -312,6 +314,25 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
                     <StopCard key={s.id} stop={s} onStatusChange={handleStatusChange} />
                   ))}
                 </div>
+              </div>
+            )}
+
+            {skipped.length > 0 && (
+              <div>
+                <button
+                  onClick={() => setSkippedOpen((o) => !o)}
+                  className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600"
+                >
+                  <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', skippedOpen && 'rotate-90')} />
+                  Skipped · {skipped.length}
+                </button>
+                {skippedOpen && (
+                  <div className="grid gap-2 sm:grid-cols-2 mt-2">
+                    {(skipped as Parameters<typeof StopCard>[0]['stop'][]).map((s) => (
+                      <StopCard key={s.id} stop={s} onStatusChange={handleStatusChange} />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -162,6 +162,7 @@ export function SchedulePickupModal({ onClose, onCreated }: Props) {
             <Input
               type="date"
               value={scheduledDate}
+              min={new Date().toISOString().split('T')[0]}
               onChange={(e) => setScheduledDate(e.target.value)}
               className="text-sm"
             />

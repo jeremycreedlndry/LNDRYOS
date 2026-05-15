@@ -27,8 +27,14 @@ export async function sendSms(to: string, message: string): Promise<void> {
     return
   }
 
+  // Staging override: redirect all SMS to a test number
+  const dest = process.env.NOTIFICATION_OVERRIDE_PHONE ?? to
+  if (process.env.NOTIFICATION_OVERRIDE_PHONE) {
+    console.log(`[sms] Override active — redirecting ${to} → ${dest}`)
+  }
+
   // Normalise to E.164 (+1xxxxxxxxxx)
-  const toFormatted = to.replace(/\D/g, '')
+  const toFormatted = dest.replace(/\D/g, '')
   const toE164 = toFormatted.startsWith('1') ? `+${toFormatted}` : `+1${toFormatted}`
 
   const res = await fetch(QUO_API_URL, {

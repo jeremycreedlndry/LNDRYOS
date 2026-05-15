@@ -23,9 +23,14 @@ export async function sendEmail(opts: SendEmailOptions): Promise<void> {
     console.log(`[email] No RESEND_API_KEY — would send to ${opts.to}: ${opts.subject}`)
     return
   }
+  // Staging override: redirect all emails to a test address
+  const to = process.env.NOTIFICATION_OVERRIDE_EMAIL ?? opts.to
+  if (process.env.NOTIFICATION_OVERRIDE_EMAIL) {
+    console.log(`[email] Override active — redirecting ${opts.to} → ${to}`)
+  }
   const { error } = await resend().emails.send({
     from: FROM,
-    to: opts.to,
+    to,
     subject: opts.subject,
     html: opts.html,
     replyTo: opts.replyTo,

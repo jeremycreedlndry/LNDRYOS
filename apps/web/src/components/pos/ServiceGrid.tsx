@@ -29,12 +29,13 @@ const CATEGORY_COLORS: Record<ItemCategory, string> = {
 
 interface Props {
   onAddItem: (item: ServiceItem) => void
+  onCustomItem?: () => void
   activeCategory: ItemCategory
   onCategoryChange: (cat: ItemCategory) => void
   priceListId?: string | null
 }
 
-export function ServiceGrid({ onAddItem, activeCategory, onCategoryChange, priceListId }: Props) {
+export function ServiceGrid({ onAddItem, onCustomItem, activeCategory, onCategoryChange, priceListId }: Props) {
   const { data: items = [] } = trpc.catalog.list.useQuery(
     priceListId ? { priceListId } : undefined
   )
@@ -90,6 +91,19 @@ export function ServiceGrid({ onAddItem, activeCategory, onCategoryChange, price
             </span>
           </button>
         ))}
+
+        {/* Custom item tile — always last */}
+        {onCustomItem && (
+          <button
+            onClick={onCustomItem}
+            className="relative flex flex-col items-start rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 text-left transition-colors hover:bg-gray-100"
+          >
+            <Plus className="absolute right-2 top-2 h-4 w-4 text-gray-400" />
+            <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Custom</span>
+            <span className="mt-1 text-sm font-semibold text-gray-500 leading-tight">Custom Item</span>
+            <span className="mt-1 text-sm text-gray-400">Enter price</span>
+          </button>
+        )}
       </div>
     </div>
   )

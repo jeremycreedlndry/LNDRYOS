@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { X, ShoppingCart, ArrowLeft, Truck, Plus } from 'lucide-react'
+import { X, ShoppingCart, ArrowLeft, Truck } from 'lucide-react'
 import { CustomerSearch } from '@/components/pos/CustomerSearch'
 import { ServiceGrid } from '@/components/pos/ServiceGrid'
 import { OrderCart, type CartLine } from '@/components/pos/OrderCart'
@@ -294,17 +294,9 @@ function POSInner() {
             <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
           </div>
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Services</h2>
-              <button
-                onClick={() => setCustomItemOpen(true)}
-                className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Custom item
-              </button>
-            </div>
-            <ServiceGrid onAddItem={handleAddItem} activeCategory={activeCategory}
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Services</h2>
+            <ServiceGrid onAddItem={handleAddItem} onCustomItem={() => setCustomItemOpen(true)}
+              activeCategory={activeCategory}
               onCategoryChange={setActiveCategory} priceListId={activePriceListId} />
           </div>
         </div>
@@ -330,25 +322,17 @@ function POSInner() {
       <div className="flex lg:hidden flex-col h-[calc(100dvh-4rem-4rem)]">
         <div className="flex-1 overflow-y-auto p-3 space-y-3 pb-20">
           {!isEditMode && (
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSchedulePickupOpen(true)}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-brand-200 bg-brand-50 py-2.5 text-sm font-medium text-brand-700 hover:bg-brand-100"
-              >
-                <Truck className="h-4 w-4" />
-                Schedule Pickup
-              </button>
-              <button
-                onClick={() => setCustomItemOpen(true)}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
-              >
-                <Plus className="h-4 w-4" />
-                Custom Item
-              </button>
-            </div>
+            <button
+              onClick={() => setSchedulePickupOpen(true)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-brand-200 bg-brand-50 py-2.5 text-sm font-medium text-brand-700 hover:bg-brand-100"
+            >
+              <Truck className="h-4 w-4" />
+              Schedule Pickup
+            </button>
           )}
           <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
-          <ServiceGrid onAddItem={handleAddItem} activeCategory={activeCategory}
+          <ServiceGrid onAddItem={handleAddItem} onCustomItem={() => setCustomItemOpen(true)}
+            activeCategory={activeCategory}
             onCategoryChange={setActiveCategory} priceListId={activePriceListId} />
         </div>
         <div className="fixed bottom-16 inset-x-0 z-30 px-3 pb-2">

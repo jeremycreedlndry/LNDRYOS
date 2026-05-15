@@ -176,12 +176,7 @@ export default function PickupsPage() {
     onError: (e) => toast.error(e.message),
   })
 
-  const createOneOff = trpc.pickupStops.createOneOff.useMutation({
-    onSuccess: () => { utils.pickupStops.listByDate.invalidate(); toast.success('Pickup stop created'); setDropOffCustomer(null) },
-    onError: (e) => toast.error(e.message),
-  })
-
-  const assignDriver = trpc.pickupStops.assignDriver.useMutation({
+const assignDriver = trpc.pickupStops.assignDriver.useMutation({
     onSuccess: () => utils.pickupStops.listByDate.invalidate(),
     onError: (e) => toast.error(e.message),
   })
@@ -372,19 +367,11 @@ export default function PickupsPage() {
           date={selectedDate}
           onConfirm={() => {
             if (!dropOffCustomer) return
-            // Create a pending order first, then link the pickup stop to it
+            // Create a pending order only — no pickup stop yet.
+            // Staff schedules the actual pickup separately when ready.
             createPickup.mutate(
               { customer_id: dropOffCustomer.id, scheduled_date: selectedDate, skip_stop: true },
-              {
-                onSuccess: (order) => {
-                  createOneOff.mutate({
-                    customer_id: dropOffCustomer.id,
-                    type: 'pickup',
-                    scheduled_date: selectedDate,
-                    order_id: order.id as string,
-                  })
-                },
-              }
+              { onSuccess: () => setDropOffCustomer(null) }
             )
           }}
           onDismiss={() => setDropOffCustomer(null)}

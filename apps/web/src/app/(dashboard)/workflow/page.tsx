@@ -281,9 +281,9 @@ function MachinesAssignModal({
   })
   const [autoSelected, setAutoSelected] = useState<string | null>(null)
 
-  // Query Lynx API for the employee's last machine — pre-select it if type matches
+  // Query Lynx API for the employee's last machine — only poll machines of this type
   const { data: lastMachine } = trpc.nayax.getLastMachineUsed.useQuery(
-    { minutes: 120 },
+    { minutes: 120, equipment_type: filterType },
     { staleTime: 0, retry: false }
   )
   useEffect(() => {

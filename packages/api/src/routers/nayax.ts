@@ -156,8 +156,9 @@ export const nayaxRouter = router({
   // the currently logged-in user.
   getLastMachineUsed: tenantProcedure
     .input(z.object({
-      member_id: z.string().uuid().optional(), // if omitted, uses current user
-      minutes:   z.number().int().positive().default(120),
+      member_id:      z.string().uuid().optional(), // if omitted, uses current user
+      minutes:        z.number().int().positive().default(120),
+      equipment_type: z.enum(['washer', 'dryer', 'folding']).optional(), // filter machines by type
     }).optional())
     .query(async ({ ctx, input }) => {
       // Get the target member's Nayax card number
@@ -176,13 +177,37 @@ export const nayaxRouter = router({
 
       if (!member?.nayax_card_id) return null
 
-      // Get all Nayax machine IDs — poll lastSales on each to find card match
+      // Get machine IDs — filtered by equipment type if specified
       let machineIds: number[]
       try {
-        const machines = await listMachines()
-        machineIds = machines.map((m) => m.MachineID)
+        const equipType = input?.equipment_type
+
+        if (equipType) {
+          // Only poll machines of the relevant type using our DB equipment records
+          const { data: equip } = await ctx.supabase
+            .from('equipment')
+            .select('nayax_device_id')
+            .eq('tenant_id', ctx.tenantId)
+            .eq('type', equipType)
+            .not('nayax_device_id', 'is', null)
+
+          const dbIds = (equip ?? [])
+            .map((e) => parseInt(String(e.nayax_device_id)))
+            .filter((id) => !isNaN(id))
+
+          if (dbIds.length > 0) {
+            machineIds = dbIds
+          } else {
+            // Fall back to all machines if none are linked in DB
+            const machines = await listMachines()
+            machineIds = machines.map((m) => m.MachineID)
+          }
+        } else {
+          const machines = await listMachines()
+          machineIds = machines.map((m) => m.MachineID)
+        }
       } catch (err) {
-        console.error('[nayax] listMachines failed:', err)
+        console.error('[nayax] machine list failed:', err)
         return null
       }
 

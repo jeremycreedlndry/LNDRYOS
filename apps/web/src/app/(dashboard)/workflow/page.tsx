@@ -279,6 +279,26 @@ function MachinesAssignModal({
     }
     return m
   })
+  const [autoSelected, setAutoSelected] = useState<string | null>(null)
+
+  // Query Lynx API for the employee's last machine — pre-select it if type matches
+  const { data: lastMachine } = trpc.nayax.getLastMachineUsed.useQuery(
+    { minutes: 120 },
+    { staleTime: 0, retry: false }
+  )
+  useEffect(() => {
+    if (!lastMachine?.machine_name || !lastMachine.equipment) return
+    if (lastMachine.equipment.type !== filterType) return
+    const equipId = lastMachine.equipment.id
+    if (busyEquipment.has(equipId)) return  // already in use by another order
+    setDetails((prev) => {
+      if (prev.has(equipId)) return prev    // already assigned
+      const next = new Map(prev)
+      next.set(equipId, { duration_minutes: null, temperature: null })
+      return next
+    })
+    setAutoSelected(lastMachine.machine_name)
+  }, [lastMachine, filterType]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const setAssignments = trpc.equipment.setAssignments.useMutation({
     onSuccess: () => { utils.orders.list.invalidate(); toast.success('Equipment updated'); onSaved() },
@@ -318,6 +338,11 @@ function MachinesAssignModal({
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
         </div>
+        {autoSelected && (
+          <div className="flex items-center gap-2 border-b border-blue-100 bg-blue-50 px-4 py-2">
+            <span className="text-xs text-blue-700">⚡ Pre-selected <strong>{autoSelected}</strong> based on your last use</span>
+          </div>
+        )}
 
         <div className="p-5 space-y-2 max-h-[60vh] overflow-y-auto">
           {equipment.length === 0 && (
@@ -433,7 +458,6 @@ export default function WorkflowPage() {
 
   const allOrders = orders as unknown as OrderRow[]
   const cleaning = allOrders.filter((o) => o.status === 'cleaning')
-  const ready = allOrders.filter((o) => o.status === 'ready')
 
   const toDoOrders = cleaning.filter((o) => !o.assignments || o.assignments.length === 0)
   const washerOrders = cleaning.filter((o) => o.assignments?.some((a) => a.equipment.type === 'washer'))
@@ -550,29 +574,6 @@ export default function WorkflowPage() {
             />
           ))}
 
-          {/* Completed column */}
-          <div className="flex w-64 shrink-0 flex-col rounded-xl bg-green-50">
-            <div className="flex items-center gap-2 px-3 py-3">
-              <Check className="h-4 w-4 text-green-600" />
-              <span className="font-semibold text-gray-700 text-sm">Cleaned</span>
-              <span className="ml-auto text-xs font-medium text-gray-400 bg-white rounded-full px-2 py-0.5 border border-gray-200">
-                {ready.length}
-              </span>
-            </div>
-            <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
-              {ready.map((order) => (
-                <BoardOrderCard
-                  key={order.id}
-                  order={order}
-                  columnType="completed"
-                  onViewDetail={setViewingOrderId}
-                />
-              ))}
-              {ready.length === 0 && (
-                <p className="text-center text-xs text-gray-300 pt-8">No ready orders</p>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 

@@ -49,49 +49,77 @@ async function nayaxFetch(path: string, options: RequestInit = {}) {
 // ─── Last machine used by card ───────────────────────────────────────────────
 
 export interface NayaxLastTransaction {
-  machineName:       string | null
-  amount:            number | null
-  authorizedAt:      string | null  // ISO datetime
+  machineId:    number
+  machineName:  string
+  amount:       number | null
+  authorizedAt: string   // ISO datetime GMT
 }
 
 /**
- * Query the most recent transaction(s) for a card number.
- * Nayax requires the card number as a SHA1 hash, base64-encoded.
- * Docs: POST /v1/cards/query?minutes={n}
+ * Find the most recent transaction for a given card number across a list of
+ * machine IDs. Uses GET /v1/machines/{id}/lastSales and matches CardNumber
+ * directly — works for both Nayax pre-paid cards and credit cards.
+ *
+ * @param cardNumber  - The card number as it appears on the card (e.g. "3103081188")
+ * @param machineIds  - Nayax integer MachineIDs to search (from the machines list)
+ * @param withinMs    - Only return transactions within this many ms of now
  */
 export async function getLastTransactionByCard(
   cardNumber: string,
-  minutes = 1440   // default: last 24 hours
+  machineIds: number[],
+  withinMs = 8 * 60 * 60 * 1000   // default: last 8 hours
 ): Promise<NayaxLastTransaction | null> {
-  // SHA1 hash the card number, then base64-encode it
-  const { createHash } = await import('crypto')
-  const sha1   = createHash('sha1').update(cardNumber).digest()
-  const hashed = sha1.toString('base64')
+  if (machineIds.length === 0) return null
 
-  const { ok, status, text } = await nayaxFetch(
-    `/v1/cards/query?minutes=${minutes}`,
-    { method: 'POST', body: JSON.stringify(hashed) }
+  // Fetch lastSales for all machines in parallel
+  const results = await Promise.allSettled(
+    machineIds.map((id) => nayaxFetch(`/v1/machines/${id}/lastSales`))
   )
 
-  if (!ok) throw new Error(`Nayax card query failed (${status}): ${text.slice(0, 200)}`)
+  const cutoff = Date.now() - withinMs
+  let best: NayaxLastTransaction | null = null
 
-  let results: Record<string, unknown>[]
-  try { results = JSON.parse(text) } catch { return null }
-  if (!Array.isArray(results) || results.length === 0) return null
+  results.forEach((result, idx) => {
+    if (result.status !== 'fulfilled' || !result.value.ok) return
+    let sales: Record<string, unknown>[]
+    try { sales = JSON.parse(result.value.text) } catch { return }
+    if (!Array.isArray(sales)) return
 
-  // Sort by most recent and return first
-  results.sort((a, b) => {
-    const da = new Date((a.AuthorizationDate ?? a.authorizedAt ?? '') as string).getTime()
-    const db = new Date((b.AuthorizationDate ?? b.authorizedAt ?? '') as string).getTime()
-    return db - da
+    for (const sale of sales) {
+      if (String(sale.CardNumber ?? '').replace(/\s/g, '') !== cardNumber.replace(/\s/g, '')) continue
+      const ts = new Date((sale.AuthorizationDateTimeGMT ?? '') as string).getTime()
+      if (isNaN(ts) || ts < cutoff) continue
+      if (!best || ts > new Date(best.authorizedAt).getTime()) {
+        best = {
+          machineId:    machineIds[idx],
+          machineName:  String(sale.MachineName ?? ''),
+          amount:       sale.AuthorizationValue != null ? Number(sale.AuthorizationValue) : null,
+          authorizedAt: String(sale.AuthorizationDateTimeGMT ?? ''),
+        }
+      }
+    }
   })
 
-  const latest = results[0]
-  return {
-    machineName:  (latest.MachineName  ?? latest.machineName  ?? null) as string | null,
-    amount:       (latest.AmountValue  ?? latest.amountValue  ?? null) as number | null,
-    authorizedAt: (latest.AuthorizationDate ?? latest.authorizedAt ?? null) as string | null,
-  }
+  return best
+}
+
+// ─── Machine list ─────────────────────────────────────────────────────────────
+
+export interface NayaxMachine {
+  MachineID:     number
+  MachineName:   string
+  MachineNumber: string  // serial / VPOS serial
+}
+
+export async function listMachines(): Promise<NayaxMachine[]> {
+  const { ok, status, text } = await nayaxFetch('/v1/machines')
+  if (!ok) throw new Error(`Nayax machines list failed (${status})`)
+  const data = JSON.parse(text)
+  return Array.isArray(data) ? data.map((m) => ({
+    MachineID:     m.MachineID,
+    MachineName:   m.MachineName ?? '',
+    MachineNumber: m.MachineNumber ?? '',
+  })) : []
 }
 
 // ─── Card lookup ──────────────────────────────────────────────────────────────

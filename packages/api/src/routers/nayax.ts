@@ -6,6 +6,7 @@ import {
   getCardBalance,
   addCreditToCard,
   getLastTransactionByCard,
+  listMachines,
 } from '../lib/nayax'
 
 export const nayaxRouter = router({
@@ -175,29 +176,44 @@ export const nayaxRouter = router({
 
       if (!member?.nayax_card_id) return null
 
+      // Get all Nayax machine IDs — poll lastSales on each to find card match
+      let machineIds: number[]
+      try {
+        const machines = await listMachines()
+        machineIds = machines.map((m) => m.MachineID)
+      } catch (err) {
+        console.error('[nayax] listMachines failed:', err)
+        return null
+      }
+
+      const withinMs = (input?.minutes ?? 120) * 60 * 1000
       let txn
       try {
-        txn = await getLastTransactionByCard(member.nayax_card_id, input?.minutes ?? 120)
+        txn = await getLastTransactionByCard(member.nayax_card_id, machineIds, withinMs)
       } catch (err) {
         console.error('[nayax] getLastMachineUsed failed:', err)
         return null
       }
 
-      if (!txn?.machineName) return null
+      if (!txn) return null
 
-      // Try to match machine name to equipment in our DB
-      const { data: equipment } = await ctx.supabase
+      // Match to equipment in our DB by nayax_device_id (MachineID) or name
+      const { data: allEquip } = await ctx.supabase
         .from('equipment')
-        .select('id, name, type')
+        .select('id, name, type, nayax_device_id')
         .eq('tenant_id', ctx.tenantId)
-        .ilike('name', txn.machineName)
-        .maybeSingle()
+
+      const equipment = (allEquip ?? []).find(
+        (e) =>
+          String(e.nayax_device_id) === String(txn!.machineId) ||
+          (e.name ?? '').toLowerCase() === txn!.machineName.toLowerCase()
+      ) ?? null
 
       return {
         machine_name:  txn.machineName,
         authorized_at: txn.authorizedAt,
         amount:        txn.amount,
-        equipment,     // null if name didn't match anything in our DB
+        equipment: equipment ? { id: equipment.id, name: equipment.name, type: equipment.type } : null,
       }
     }),
 

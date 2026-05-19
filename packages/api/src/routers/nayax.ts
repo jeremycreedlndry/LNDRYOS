@@ -148,22 +148,30 @@ export const nayaxRouter = router({
       return { success: true }
     }),
 
-  // ─── Last machine used by the current employee ────────────────────────────
+  // ─── Last machine used by an employee ─────────────────────────────────────
   //
   // Queries Nayax Lynx API for the most recent vend on the employee's card.
-  // Returns the machine name + timestamp so the app can prompt "assign to order?"
+  // Pass member_id to look up any staff member (admin use), or omit to look up
+  // the currently logged-in user.
   getLastMachineUsed: tenantProcedure
     .input(z.object({
-      minutes: z.number().int().positive().default(120), // look back window
+      member_id: z.string().uuid().optional(), // if omitted, uses current user
+      minutes:   z.number().int().positive().default(120),
     }).optional())
     .query(async ({ ctx, input }) => {
-      // Get this employee's Nayax card number
-      const { data: member } = await ctx.supabase
+      // Get the target member's Nayax card number
+      let memberQuery = ctx.supabase
         .from('tenant_members')
         .select('nayax_card_id, display_name')
         .eq('tenant_id', ctx.tenantId)
-        .eq('user_id', ctx.userId)
-        .single()
+
+      if (input?.member_id) {
+        memberQuery = memberQuery.eq('id', input.member_id)
+      } else {
+        memberQuery = memberQuery.eq('user_id', ctx.userId)
+      }
+
+      const { data: member } = await memberQuery.single()
 
       if (!member?.nayax_card_id) return null
 

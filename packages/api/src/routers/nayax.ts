@@ -182,8 +182,11 @@ export const nayaxRouter = router({
       try {
         const equipType = input?.equipment_type
 
+        // Always fetch the full machine list so we can resolve serial → MachineID
+        const allMachines = await listMachines()
+
         if (equipType) {
-          // Only poll machines of the relevant type using our DB equipment records
+          // Get serial numbers / device IDs stored in our equipment table
           const { data: equip } = await ctx.supabase
             .from('equipment')
             .select('nayax_device_id')
@@ -191,20 +194,20 @@ export const nayaxRouter = router({
             .eq('type', equipType)
             .not('nayax_device_id', 'is', null)
 
-          const dbIds = (equip ?? [])
-            .map((e) => parseInt(String(e.nayax_device_id)))
-            .filter((id) => !isNaN(id))
+          const deviceIds = (equip ?? []).map((e) => String(e.nayax_device_id).trim())
 
-          if (dbIds.length > 0) {
-            machineIds = dbIds
-          } else {
-            // Fall back to all machines if none are linked in DB
-            const machines = await listMachines()
-            machineIds = machines.map((m) => m.MachineID)
-          }
+          // Resolve each stored ID to a real integer MachineID
+          // Matches by MachineID (if already integer), MachineNumber (serial), or VPOSSerialNumber
+          const resolved = allMachines
+            .filter((m) =>
+              deviceIds.includes(String(m.MachineID)) ||
+              deviceIds.includes(m.MachineNumber)
+            )
+            .map((m) => m.MachineID)
+
+          machineIds = resolved.length > 0 ? resolved : allMachines.map((m) => m.MachineID)
         } else {
-          const machines = await listMachines()
-          machineIds = machines.map((m) => m.MachineID)
+          machineIds = allMachines.map((m) => m.MachineID)
         }
       } catch (err) {
         console.error('[nayax] machine list failed:', err)

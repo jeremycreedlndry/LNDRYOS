@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { router, tenantProcedure } from '../trpc'
 import { sendEmail, orderCreatedEmail, orderReadyEmail, APP_URL } from '../lib/email'
 import { sendSms, orderCreatedSms, orderReadySms, logMessage } from '../lib/sms'
+import { chargeCardToken } from '../lib/helcim'
 
 const orderLineInputSchema = z.object({
   service_item_id: z.string().uuid().nullable().optional(),
@@ -20,9 +21,10 @@ const orderStatusSchema = z.enum(['cleaning', 'ready', 'picked_up', 'delivered',
 export const ordersRouter = router({
   list: tenantProcedure
     .input(z.object({
-      status: orderStatusSchema.optional(),
-      limit: z.number().default(50),
-      offset: z.number().default(0),
+      status:           orderStatusSchema.optional(),
+      exclude_statuses: z.array(orderStatusSchema).optional(),
+      limit:            z.number().default(50),
+      offset:           z.number().default(0),
     }).optional())
     .query(async ({ ctx, input }) => {
       let query = ctx.supabase
@@ -39,6 +41,7 @@ export const ordersRouter = router({
         .range(input?.offset ?? 0, (input?.offset ?? 0) + (input?.limit ?? 50) - 1)
 
       if (input?.status) query = query.eq('status', input.status)
+      if (input?.exclude_statuses?.length) query = query.not('status', 'in', `(${input.exclude_statuses.join(',')})`)
 
       const { data, error } = await query
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
@@ -77,7 +80,10 @@ export const ordersRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const subtotal = input.lines.reduce((sum, l) => sum + Math.round(l.quantity * l.unit_price), 0)
-      const taxAmount = Math.round(subtotal * input.tax_rate)
+      const taxableSubtotal = input.lines
+        .filter((l) => l.category !== 'gift_card')
+        .reduce((sum, l) => sum + Math.round(l.quantity * l.unit_price), 0)
+      const taxAmount = Math.round(taxableSubtotal * input.tax_rate)
       const total = subtotal + taxAmount - input.discount_amount
 
       const { data: lastOrder } = await ctx.supabase
@@ -226,7 +232,10 @@ export const ordersRouter = router({
       }
 
       const subtotal = input.lines.reduce((sum, l) => sum + Math.round(l.quantity * l.unit_price), 0)
-      const taxAmount = Math.round(subtotal * input.tax_rate)
+      const taxableSubtotal = input.lines
+        .filter((l) => l.category !== 'gift_card')
+        .reduce((sum, l) => sum + Math.round(l.quantity * l.unit_price), 0)
+      const taxAmount = Math.round(taxableSubtotal * input.tax_rate)
       const total = subtotal + taxAmount - input.discount_amount
 
       // Replace all lines
@@ -302,9 +311,10 @@ export const ordersRouter = router({
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
 
-      // Send order-ready email (fire-and-forget)
+      // Send order-ready email + auto-charge saved card (fire-and-forget)
       if (input.status === 'ready' && data.customer_id) {
         sendOrderReadyEmail(ctx.supabase, ctx.tenantId, data).catch(console.error)
+        autoChargeIfSavedCard(ctx.supabase, ctx.tenantId, data).catch(console.error)
       }
 
       return data
@@ -333,7 +343,159 @@ export const ordersRouter = router({
         outstanding: orders.filter((o) => o.payment_status !== 'paid').reduce((s, o) => s + (o.total_amount - o.paid_amount), 0),
       }
     }),
+
+  // ─── Advanced search ──────────────────────────────────────────────────────────
+  search: tenantProcedure
+    .input(z.object({
+      query:           z.string().optional(),
+      status:          orderStatusSchema.optional(),
+      payment_status:  z.enum(['paid', 'unpaid', 'partial']).optional(),
+      created_after:   z.string().optional(),
+      created_before:  z.string().optional(),
+      ready_after:     z.string().optional(),
+      ready_before:    z.string().optional(),
+      limit:           z.number().default(100),
+    }))
+    .query(async ({ ctx, input }) => {
+      const q = input.query?.trim()
+
+      // ── Step 1: resolve matching customer IDs ─────────────────────────────
+      // Split multi-word queries (e.g. "Jeremy Creed") into individual words
+      // and intersect results so both words must match somewhere on the customer.
+      let customerIds: string[] | null = null
+
+      if (q) {
+        const words = q.split(/\s+/).filter(Boolean)
+
+        // Fetch customers matching each word separately, then intersect
+        const perWord = await Promise.all(
+          words.map((word) =>
+            ctx.supabase
+              .from('customers')
+              .select('id')
+              .eq('tenant_id', ctx.tenantId)
+              .or(
+                `first_name.ilike.%${word}%,last_name.ilike.%${word}%,phone.ilike.%${word}%,email.ilike.%${word}%`
+              )
+              .limit(500)
+          )
+        )
+
+        // Intersect: a customer must match every word
+        const sets = perWord.map((r) => new Set((r.data ?? []).map((c) => c.id)))
+        customerIds = [...sets[0]].filter((id) => sets.every((s) => s.has(id)))
+      }
+
+      // ── Step 2: build orders query ─────────────────────────────────────────
+      let query = ctx.supabase
+        .from('orders')
+        .select(`
+          id, order_number, status, payment_status, total_amount, paid_amount,
+          created_at, ready_at, picked_up_at, due_date, notes, created_by,
+          customer:customers(id, first_name, last_name, phone, email, address_street, address_city, order_preferences),
+          lines:order_lines(id, name, category, quantity, unit_label, unit_price),
+          payments:payments(id, amount, method, processed_at, processed_by)
+        `)
+        .eq('tenant_id', ctx.tenantId)
+        .order('created_at', { ascending: false })
+        .limit(input.limit)
+
+      if (input.status)         query = query.eq('status', input.status)
+      if (input.payment_status) query = query.eq('payment_status', input.payment_status)
+      if (input.created_after)  query = query.gte('created_at', input.created_after)
+      if (input.created_before) query = query.lte('created_at', input.created_before + 'T23:59:59')
+      if (input.ready_after)    query = query.gte('ready_at', input.ready_after)
+      if (input.ready_before)   query = query.lte('ready_at', input.ready_before + 'T23:59:59')
+
+      // Apply text filter at DB level
+      if (q) {
+        if (customerIds && customerIds.length > 0) {
+          // Also check if it might be an order number (no spaces)
+          if (!q.includes(' ')) {
+            query = query.or(
+              `order_number.ilike.%${q}%,customer_id.in.(${customerIds.join(',')})`
+            )
+          } else {
+            query = query.in('customer_id', customerIds)
+          }
+        } else if (!q.includes(' ')) {
+          // No customer match — try order number only
+          query = query.ilike('order_number', `%${q}%`)
+        } else {
+          return []
+        }
+      }
+
+      const { data, error } = await query
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return data ?? []
+    }),
 })
+
+// ─── Auto-charge helper (fire-and-forget) ────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function autoChargeIfSavedCard(supabase: any, tenantId: string, order: any) {
+  // Only charge if there's an outstanding balance
+  const balance = (order.total_amount ?? 0) - (order.paid_amount ?? 0)
+  if (balance <= 0 || order.payment_status === 'paid') return
+  if (!order.customer_id) return
+
+  // Fetch customer's saved card token
+  const { data: customer } = await supabase
+    .from('customers')
+    .select('helcim_card_token, first_name, last_name')
+    .eq('id', order.customer_id)
+    .single()
+
+  if (!customer?.helcim_card_token) return  // no saved card, nothing to do
+
+  // Charge the saved card
+  let txn
+  try {
+    txn = await chargeCardToken({
+      amountCents:    balance,
+      cardToken:      customer.helcim_card_token,
+      idempotencyKey: `order-ready-${order.id}`,
+      currency:       'CAD',
+    })
+  } catch (err) {
+    console.error('[auto-charge] Helcim charge failed for order', order.id, err)
+    return
+  }
+
+  if (!txn || (txn.status && String(txn.status).toLowerCase() !== 'approved')) {
+    console.warn('[auto-charge] Charge not approved for order', order.id, txn?.status)
+    return
+  }
+
+  // Record payment
+  const { error: payErr } = await supabase.from('payments').insert({
+    order_id:       order.id,
+    tenant_id:      tenantId,
+    amount:         balance,
+    method:         'card_online',
+    payment_status: 'completed',
+    processed_at:   new Date().toISOString(),
+    notes:          `Auto-charge (saved card) · Helcim txn ${txn.transactionId}`,
+  })
+  if (payErr) {
+    console.error('[auto-charge] Failed to insert payment record', payErr.message)
+    return
+  }
+
+  // Mark order paid
+  await supabase
+    .from('orders')
+    .update({
+      paid_amount:    order.total_amount,
+      payment_status: 'paid',
+      updated_at:     new Date().toISOString(),
+    })
+    .eq('id', order.id)
+
+  console.log(`[auto-charge] Charged ${balance} cents for order ${order.id} (txn ${txn.transactionId})`)
+}
 
 // ─── Email helpers (fire-and-forget) ─────────────────────────────────────────
 

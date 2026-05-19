@@ -1,6 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServiceClient } from '@laundry/db'
-import { initializeHelcimPay } from '@laundry/api/lib/helcim'
+
+async function initHelcimPay(amountCents: number) {
+  const token = process.env.HELCIM_API_TOKEN
+  if (!token) throw new Error('HELCIM_API_TOKEN is not set')
+
+  const res = await fetch('https://api.helcim.com/v2/helcim-pay/initialize', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'api-token': token,
+    },
+    body: JSON.stringify({
+      paymentType: 'purchase',
+      amount: +(amountCents / 100).toFixed(2),
+      currency: 'CAD',
+    }),
+  })
+  const json = await res.json()
+  if (!res.ok) {
+    const msg = json?.errors?.[0]?.message ?? json?.message ?? `HTTP ${res.status}`
+    throw new Error(`Helcim init: ${msg}`)
+  }
+  return json as { checkoutToken: string; secretToken: string }
+}
 
 export async function POST(req: NextRequest) {
   const { order_id, payment_token, tip_cents } = await req.json()
@@ -31,7 +55,7 @@ export async function POST(req: NextRequest) {
   if (total <= 0) return NextResponse.json({ error: 'Nothing due' }, { status: 400 })
 
   try {
-    const session = await initializeHelcimPay({ amountCents: total })
+    const session = await initHelcimPay(total)
     return NextResponse.json({ checkoutToken: session.checkoutToken, total_cents: total })
   } catch (err) {
     console.error('Helcim init error:', err)

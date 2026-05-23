@@ -95,6 +95,7 @@ export const paymentsRouter = router({
           cardHolderName:  input.card_name,
           saveCard:        input.save_card,
           idempotencyKey,
+          ipAddress:       ctx.ip,
         })
       } catch (err) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: (err as Error).message })
@@ -253,6 +254,7 @@ export const paymentsRouter = router({
           amountCents:    input.amount,
           cardToken:      customer.helcim_card_token,
           idempotencyKey,
+          ipAddress:      ctx.ip,
         })
       } catch (err) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: (err as Error).message })

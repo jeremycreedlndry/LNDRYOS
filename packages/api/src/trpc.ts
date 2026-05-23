@@ -6,6 +6,7 @@ export interface TRPCContext {
   supabase: SupabaseClient
   userId: string
   tenantId: string
+  ip: string
 }
 
 const t = initTRPC.context<TRPCContext>().create({ transformer: superjson })

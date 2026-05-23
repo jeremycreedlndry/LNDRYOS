@@ -26,8 +26,23 @@ async function helcimFetch<T = unknown>(
   const res = await fetch(`${BASE}${path}`, { ...init, headers })
   const json = await res.json()
   if (!res.ok) {
-    const msg = json?.errors?.[0]?.message ?? json?.message ?? `HTTP ${res.status}`
-    throw new Error(`Helcim ${path}: ${msg}`)
+    // Helcim errors can be array, object, or string
+    let msg: string
+    if (json?.errors) {
+      if (Array.isArray(json.errors)) {
+        msg = json.errors.map((e: { message?: string } | string) =>
+          typeof e === 'string' ? e : e.message
+        ).join(', ')
+      } else if (typeof json.errors === 'object') {
+        msg = Object.entries(json.errors).map(([k, v]) => `${k}: ${v}`).join(', ')
+      } else {
+        msg = String(json.errors)
+      }
+    } else {
+      msg = json?.message ?? json?.error ?? `HTTP ${res.status}`
+    }
+    console.error(`[Helcim] ${path} ${res.status}:`, JSON.stringify(json))
+    throw new Error(`Helcim: ${msg}`)
   }
   return json as T
 }

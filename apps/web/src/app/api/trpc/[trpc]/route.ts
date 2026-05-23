@@ -28,7 +28,7 @@ async function createContext(req: NextRequest): Promise<TRPCContext> {
 
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) {
-    return { supabase: authClient, userId: '', tenantId: '' }
+    return { supabase: authClient, userId: '', tenantId: '', ip: '1.1.1.1' }
   }
 
   // Use service client for all data operations — tenant isolation is enforced by tenantProcedure
@@ -42,7 +42,11 @@ async function createContext(req: NextRequest): Promise<TRPCContext> {
     ?? cookieStore.get('tenant_id')?.value
     ?? ''
 
-  return { supabase, userId: user.id, tenantId }
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? req.headers.get('x-real-ip')
+    ?? '1.1.1.1'
+
+  return { supabase, userId: user.id, tenantId, ip }
 }
 
 const handler = (req: NextRequest) =>

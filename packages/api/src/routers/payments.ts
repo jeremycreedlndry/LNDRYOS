@@ -83,7 +83,7 @@ export const paymentsRouter = router({
       customer_id:    z.string().uuid().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const idempotencyKey = `keyed-${input.order_id}-${Date.now()}`
+      const idempotencyKey = `keyed${input.order_id.replace(/-/g, '')}${Date.now()}`
 
       let result
       try {
@@ -148,7 +148,7 @@ export const paymentsRouter = router({
       terminal_id: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const idempotencyKey = `terminal-${input.order_id}-${Date.now()}`
+      const idempotencyKey = `terminal${input.order_id.replace(/-/g, '')}${Date.now()}`
 
       let result
       try {
@@ -246,7 +246,7 @@ export const paymentsRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'No saved card on file' })
       }
 
-      const idempotencyKey = `saved-${input.order_id}-${Date.now()}`
+      const idempotencyKey = `saved${input.order_id.replace(/-/g, '')}${Date.now()}`
 
       let result
       try {

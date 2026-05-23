@@ -14,6 +14,9 @@ export interface CartLine {
   unit_price: number
   unit_label: string
   notes?: string
+  // Physical gift cards only — set after Nayax card lookup
+  gift_card_display_number?: string
+  gift_card_uid?: string        // Nayax CardUniqueIdentifier
 }
 
 interface Props {
@@ -40,7 +43,10 @@ export function OrderCart({
   checkoutLabel,
 }: Props) {
   const subtotal = lines.reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
-  const tax = Math.round(subtotal * taxRate)
+  const taxableSubtotal = lines
+    .filter((l) => l.category !== 'gift_card')
+    .reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
+  const tax = Math.round(taxableSubtotal * taxRate)
   const total = subtotal + tax - discountCents
 
   if (lines.length === 0) {

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { WashingMachine, Wind, FoldVertical, X, Plus, Check } from 'lucide-react'
+import { WashingMachine, Wind, FoldVertical, X, Plus, Check, LayoutGrid, Columns } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
 import type { EquipmentType } from '@laundry/db'
@@ -257,7 +257,7 @@ const WASHER_TIMES = [30, 35, 40, 45]
 const DRYER_TIMES  = [15, 20, 30, 45, 60]
 const TEMPS = ['Cold', 'Warm', 'Hot']
 
-type AssignmentDetail = { duration_minutes: number | null; temperature: string | null }
+type AssignmentDetail = { duration_minutes: number | null; temperature: string | null; assigned_at?: string | null }
 
 function MachinesAssignModal({
   order, filterType, busyEquipment, onClose, onSaved,
@@ -275,11 +275,13 @@ function MachinesAssignModal({
   const [details, setDetails] = useState<Map<string, AssignmentDetail>>(() => {
     const m = new Map<string, AssignmentDetail>()
     for (const a of order.assignments) {
-      m.set(a.equipment.id, { duration_minutes: a.duration_minutes, temperature: a.temperature })
+      m.set(a.equipment.id, { duration_minutes: a.duration_minutes, temperature: a.temperature, assigned_at: a.assigned_at })
     }
     return m
   })
   const [autoSelected, setAutoSelected] = useState<string | null>(null)
+  // Stacked dryers: when Nayax device has top+bottom, we need the employee to pick one
+  const [stackedCandidates, setStackedCandidates] = useState<{ id: string; name: string }[]>([])
 
   // Query Lynx API for the employee's last machine — only poll machines of this type
   const { data: lastMachine } = trpc.nayax.getLastMachineUsed.useQuery(
@@ -287,17 +289,38 @@ function MachinesAssignModal({
     { staleTime: 0, retry: false }
   )
   useEffect(() => {
-    if (!lastMachine?.machine_name || !lastMachine.equipment) return
-    if (lastMachine.equipment.type !== filterType) return
-    const equipId = lastMachine.equipment.id
-    if (busyEquipment.has(equipId)) return  // already in use by another order
-    setDetails((prev) => {
-      if (prev.has(equipId)) return prev    // already assigned
-      const next = new Map(prev)
-      next.set(equipId, { duration_minutes: null, temperature: null })
-      return next
-    })
-    setAutoSelected(lastMachine.machine_name)
+    if (!lastMachine?.machine_name || !lastMachine.equipment?.length) return
+    const matches = lastMachine.equipment.filter((e) => e.type === filterType)
+    if (matches.length === 0) return
+
+    if (matches.length === 1) {
+      // Single machine — auto-select as before
+      const equipId = matches[0].id
+      if (busyEquipment.has(equipId)) return
+      setDetails((prev) => {
+        if (prev.has(equipId)) return prev
+        const next = new Map(prev)
+        next.set(equipId, { duration_minutes: null, temperature: null })
+        return next
+      })
+      setAutoSelected(matches[0].name)
+    } else {
+      // Stacked dryer (or any device with multiple equipment) — ask which slot
+      const available = matches.filter((m) => !busyEquipment.has(m.id))
+      if (available.length === 0) return  // both slots busy
+      if (available.length === 1) {
+        // Only one slot free — auto-select it
+        setDetails((prev) => {
+          if (prev.has(available[0].id)) return prev
+          const next = new Map(prev)
+          next.set(available[0].id, { duration_minutes: null, temperature: null })
+          return next
+        })
+        setAutoSelected(available[0].name)
+      } else {
+        setStackedCandidates(available)
+      }
+    }
   }, [lastMachine, filterType]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const setAssignments = trpc.equipment.setAssignments.useMutation({
@@ -324,7 +347,7 @@ function MachinesAssignModal({
       return next
     })
 
-  const equipment = allEquipment.filter((e) => e.type === filterType)
+  const equipment = sortEquipment(allEquipment.filter((e) => e.type === filterType) as EquipItem[])
   const times = filterType === 'washer' ? WASHER_TIMES : filterType === 'dryer' ? DRYER_TIMES : []
   const typeLabel = filterType === 'washer' ? 'Washer' : filterType === 'dryer' ? 'Dryer' : 'Folding Station'
 
@@ -338,7 +361,36 @@ function MachinesAssignModal({
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
         </div>
-        {autoSelected && (
+        {stackedCandidates.length > 0 && (
+          <div className="border-b border-amber-100 bg-amber-50 px-4 py-3">
+            <p className="text-xs font-semibold text-amber-800 mb-2">
+              ⚡ Used <strong>{lastMachine?.machine_name}</strong> — top or bottom dryer?
+            </p>
+            <div className="flex gap-2">
+              {stackedCandidates.map((c) => {
+                const slotLabel = c.name.toUpperCase().includes('BOTTOM') ? 'Bottom' : c.name.toUpperCase().includes('TOP') ? 'Top' : c.name
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      setDetails((prev) => {
+                        const next = new Map(prev)
+                        next.set(c.id, { duration_minutes: null, temperature: null })
+                        return next
+                      })
+                      setStackedCandidates([])
+                      setAutoSelected(c.name)
+                    }}
+                    className="flex-1 rounded-lg border border-amber-300 bg-white py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-50 transition-colors"
+                  >
+                    {slotLabel}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        {autoSelected && stackedCandidates.length === 0 && (
           <div className="flex items-center gap-2 border-b border-blue-100 bg-blue-50 px-4 py-2">
             <span className="text-xs text-blue-700">⚡ Pre-selected <strong>{autoSelected}</strong> based on your last use</span>
           </div>
@@ -441,6 +493,220 @@ function MachinesAssignModal({
   )
 }
 
+// ─── Machine View ─────────────────────────────────────────────────────────────
+
+interface EquipItem { id: string; name: string; type: string; sort_order: number }
+
+/**
+ * Returns a [brandOrder, machineNumber, slotOrder] sort key.
+ * Washers: LG (1–21) → Domus → other
+ * Dryers:  ADC by number, top (0) before bottom (1)
+ */
+function parseMachineSort(name: string): [number, number, number] {
+  const upper = name.toUpperCase()
+  // Extract the first run of digits (e.g. "LG 5 - Giant" → 5, "ADC DBL 3 (Top)" → 3)
+  const num  = parseInt(name.match(/\d+/)?.[0] ?? '999')
+  const slot = upper.includes('BOTTOM') ? 1 : 0
+  if (upper.includes('LG'))    return [0, num, slot]
+  if (upper.includes('DOMUS')) return [1, num, slot]
+  if (upper.includes('ADC'))   return [2, num, slot]
+  return [3, num, slot]
+}
+
+function sortEquipment(items: EquipItem[]): EquipItem[] {
+  return [...items].sort((a, b) => {
+    const ka = parseMachineSort(a.name)
+    const kb = parseMachineSort(b.name)
+    for (let i = 0; i < 3; i++) {
+      if (ka[i] !== kb[i]) return ka[i] - kb[i]
+    }
+    return a.sort_order - b.sort_order
+  })
+}
+
+function MachineTile({
+  equip,
+  assignmentData,
+  onViewDetail,
+}: {
+  equip: EquipItem
+  assignmentData?: { order: OrderRow; assignment: MachineAssignment }
+  onViewDetail: (id: string) => void
+}) {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 15_000)
+    return () => clearInterval(id)
+  }, [])
+
+  const { order, assignment } = assignmentData ?? {}
+
+  const remaining = useMemo(() => {
+    if (!assignment?.duration_minutes || !assignment?.assigned_at) return null
+    const elapsed = (Date.now() - new Date(assignment.assigned_at).getTime()) / 60000
+    return Math.max(0, Math.ceil(assignment.duration_minutes - elapsed))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignment?.assigned_at, assignment?.duration_minutes, tick])
+
+  const done  = remaining !== null && remaining === 0
+  const inUse = !!order
+
+  const customerName = order?.customer
+    ? `${order.customer.first_name} ${order.customer.last_name}`
+    : order?.customer_name ?? 'Walk-in'
+
+  // Colour scheme
+  const bg = !inUse
+    ? 'bg-gray-50 border-gray-200'
+    : done
+    ? 'bg-green-50 border-green-400'
+    : equip.type === 'washer'
+    ? 'bg-blue-50 border-blue-300'
+    : equip.type === 'dryer'
+    ? 'bg-orange-50 border-orange-300'
+    : 'bg-purple-50 border-purple-300'
+
+  const dotColour = !inUse
+    ? 'bg-gray-300'
+    : done
+    ? 'bg-green-500 animate-pulse'
+    : equip.type === 'washer'
+    ? 'bg-blue-500'
+    : equip.type === 'dryer'
+    ? 'bg-orange-500'
+    : 'bg-purple-500'
+
+  return (
+    <button
+      onClick={() => order && onViewDetail(order.id)}
+      disabled={!order}
+      className={cn(
+        'relative flex flex-col rounded-xl border-2 p-3 text-left transition-all w-full',
+        bg,
+        order && 'hover:shadow-md cursor-pointer',
+        !order && 'cursor-default',
+      )}
+    >
+      {/* Status dot */}
+      <span className={cn('absolute top-2.5 right-2.5 h-2.5 w-2.5 rounded-full', dotColour)} />
+
+      {/* Machine name */}
+      <p className="text-xs font-bold text-gray-700 pr-4 leading-tight truncate">{equip.name}</p>
+
+      {inUse ? (
+        <>
+          <p className="mt-1.5 text-sm font-semibold text-gray-900 truncate leading-tight">{customerName}</p>
+          <p className="text-[10px] text-gray-500 truncate">{order!.order_number}</p>
+          {remaining !== null && (
+            <p className={cn(
+              'mt-1.5 text-lg font-black leading-none',
+              done ? 'text-green-600' : equip.type === 'washer' ? 'text-blue-600' : 'text-orange-600',
+            )}>
+              {done ? '✓ Done' : `${remaining}m`}
+            </p>
+          )}
+          {assignment?.assigned_at && assignment.duration_minutes && !done && (
+            <p className="text-[10px] text-gray-400 mt-0.5">
+              {formatTimeRange(assignment.assigned_at, assignment.duration_minutes)}
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="mt-2 text-xs text-gray-400">Idle</p>
+      )}
+    </button>
+  )
+}
+
+function MachineSection({
+  label, Icon, bgHeader, equipment, assignmentsByEquip, onViewDetail,
+}: {
+  label: string
+  Icon: React.ElementType
+  bgHeader: string
+  equipment: EquipItem[]
+  assignmentsByEquip: Map<string, { order: OrderRow; assignment: MachineAssignment }>
+  onViewDetail: (id: string) => void
+}) {
+  if (equipment.length === 0) return null
+  const inUseCount = equipment.filter((e) => assignmentsByEquip.has(e.id)).length
+
+  return (
+    <div className="mb-6">
+      <div className={cn('flex items-center gap-2 rounded-lg px-3 py-2 mb-3', bgHeader)}>
+        <Icon className="h-4 w-4 text-gray-600" />
+        <span className="text-sm font-semibold text-gray-700">{label}</span>
+        <span className="ml-auto text-xs text-gray-500">
+          {inUseCount} / {equipment.length} in use
+        </span>
+      </div>
+      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+        {equipment.map((equip) => (
+          <MachineTile
+            key={equip.id}
+            equip={equip}
+            assignmentData={assignmentsByEquip.get(equip.id)}
+            onViewDetail={onViewDetail}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MachineView({
+  cleaning,
+  onViewDetail,
+}: {
+  cleaning: OrderRow[]
+  onViewDetail: (id: string) => void
+}) {
+  const { data: allEquipment = [] } = trpc.equipment.list.useQuery(undefined, { staleTime: 60_000 })
+
+  const assignmentsByEquip = useMemo(() => {
+    const map = new Map<string, { order: OrderRow; assignment: MachineAssignment }>()
+    for (const order of cleaning) {
+      for (const a of order.assignments ?? []) {
+        map.set(a.equipment.id, { order, assignment: a })
+      }
+    }
+    return map
+  }, [cleaning])
+
+  const washers  = sortEquipment((allEquipment as EquipItem[]).filter((e) => e.type === 'washer'))
+  const dryers   = sortEquipment((allEquipment as EquipItem[]).filter((e) => e.type === 'dryer'))
+  const folding  = sortEquipment((allEquipment as EquipItem[]).filter((e) => e.type === 'folding'))
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <MachineSection
+        label="Washers"
+        Icon={WashingMachine}
+        bgHeader="bg-blue-50"
+        equipment={washers}
+        assignmentsByEquip={assignmentsByEquip}
+        onViewDetail={onViewDetail}
+      />
+      <MachineSection
+        label="Dryers"
+        Icon={Wind}
+        bgHeader="bg-orange-50"
+        equipment={dryers}
+        assignmentsByEquip={assignmentsByEquip}
+        onViewDetail={onViewDetail}
+      />
+      <MachineSection
+        label="Folding Stations"
+        Icon={FoldVertical}
+        bgHeader="bg-purple-50"
+        equipment={folding}
+        assignmentsByEquip={assignmentsByEquip}
+        onViewDetail={onViewDetail}
+      />
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function WorkflowPage() {
@@ -450,6 +716,7 @@ export default function WorkflowPage() {
     { refetchInterval: 30_000 }
   )
 
+  const [viewMode, setViewMode] = useState<'board' | 'machines'>('board')
   const [draggingOrderId, setDraggingOrderId] = useState<string | null>(null)
   const [dragTarget, setDragTarget] = useState<EquipmentType | null>(null)
   const [assignTarget, setAssignTarget] = useState<{ order: OrderRow; type: EquipmentType } | null>(null)
@@ -521,10 +788,45 @@ export default function WorkflowPage() {
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-gray-200 bg-white px-6 py-4 shrink-0">
         <h1 className="text-xl font-bold text-gray-900">Workflow</h1>
-        <span className="text-sm text-gray-400">Drag orders between columns to assign equipment</span>
+        {viewMode === 'board' && (
+          <span className="text-sm text-gray-400">Drag orders between columns to assign equipment</span>
+        )}
+        {/* View toggle */}
+        <div className="ml-auto flex items-center gap-1 rounded-lg bg-gray-100 p-1">
+          <button
+            onClick={() => setViewMode('board')}
+            className={cn(
+              'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors',
+              viewMode === 'board'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700',
+            )}
+          >
+            <Columns className="h-3.5 w-3.5" />
+            Board
+          </button>
+          <button
+            onClick={() => setViewMode('machines')}
+            className={cn(
+              'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors',
+              viewMode === 'machines'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700',
+            )}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            Machine View
+          </button>
+        </div>
       </div>
 
+      {/* Machine View */}
+      {viewMode === 'machines' && (
+        <MachineView cleaning={cleaning} onViewDetail={setViewingOrderId} />
+      )}
+
       {/* Board */}
+      {viewMode === 'board' && (
       <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
         <div className="flex gap-4 h-full">
 
@@ -576,6 +878,7 @@ export default function WorkflowPage() {
 
         </div>
       </div>
+      )}
 
       {/* Assign modal */}
       {assignTarget && (

@@ -2,10 +2,12 @@
 
 import { useState, useRef } from 'react'
 import Link from 'next/link'
-import { X, WashingMachine, Wind, FoldVertical, Mail, Receipt, Send, Trash2, Truck } from 'lucide-react'
+import { X, WashingMachine, Wind, FoldVertical, Mail, Receipt, Send, Trash2, Truck, Pencil, DollarSign, Camera, Plus, ChevronDown } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { formatCurrency, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { CustomerProfilePanel } from '@/components/customers/CustomerProfilePanel'
+import { CancelOrderModal } from '@/components/orders/CancelOrderModal'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +57,7 @@ const METHOD_LABEL: Record<string, string> = {
   saved_card:       'Saved Card',
   pay_on_collection:'Pay on Collection',
   check:            'Check',
+  direct_deposit:   'Direct Deposit',
   invoice:          'Invoice',
 }
 
@@ -69,6 +72,172 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+// ─── Issues section ───────────────────────────────────────────────────────────
+
+function IssuesSection({ orderId }: { orderId: string }) {
+  const utils = trpc.useUtils()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const { data: issues = [] } = trpc.orderIssues.listByOrder.useQuery({ order_id: orderId })
+  const { data: categories = [] } = trpc.orderIssues.listCategories.useQuery()
+
+  const [showForm,         setShowForm]         = useState(false)
+  const [preview,          setPreview]          = useState<string | null>(null)
+  const [file,             setFile]             = useState<File | null>(null)
+  const [category,         setCategory]         = useState('')
+  const [note,             setNote]             = useState('')
+  const [newCatInput,      setNewCatInput]      = useState('')
+  const [showNewCat,       setShowNewCat]       = useState(false)
+  const [uploading,        setUploading]        = useState(false)
+
+  const createIssue = trpc.orderIssues.create.useMutation({
+    onSuccess: () => { utils.orderIssues.listByOrder.invalidate({ order_id: orderId }); resetForm() },
+    onError: (e) => { import('react-hot-toast').then(({ default: toast }) => toast.error(e.message)) },
+  })
+  const deleteIssue = trpc.orderIssues.delete.useMutation({
+    onSuccess: () => utils.orderIssues.listByOrder.invalidate({ order_id: orderId }),
+  })
+  const addCategory = trpc.orderIssues.addCategory.useMutation({
+    onSuccess: (cat) => {
+      utils.orderIssues.listCategories.invalidate()
+      setCategory(cat.label); setNewCatInput(''); setShowNewCat(false)
+    },
+  })
+
+  const allCategories = (categories as { id: string; label: string }[]).map((c) => c.label)
+
+  function resetForm() {
+    setPreview(null); setFile(null); setCategory(''); setNote(''); setShowForm(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    setFile(f)
+    setPreview(URL.createObjectURL(f))
+    setShowForm(true)
+  }
+
+  async function handleSubmit() {
+    if (!file || !category) return
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('orderId', orderId)
+      const res  = await fetch('/api/upload/order-issue', { method: 'POST', body: fd })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Upload failed')
+      await createIssue.mutateAsync({ order_id: orderId, photo_url: json.photo_url, storage_path: json.storage_path, category, note: note.trim() || null })
+    } catch (e: unknown) {
+      import('react-hot-toast').then(({ default: toast }) => toast.error(e instanceof Error ? e.message : 'Upload failed'))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div>
+      {/* Existing issues */}
+      {issues.length > 0 && (
+        <div className="space-y-2 mb-3">
+          {(issues as { id: string; photo_url: string; category: string; note: string | null; created_at: string }[]).map((issue) => (
+            <div key={issue.id} className="flex gap-3 rounded-xl border border-gray-200 p-3">
+              <a href={issue.photo_url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                <img src={issue.photo_url} alt={issue.category}
+                  className="h-16 w-16 rounded-lg object-cover border border-gray-100 hover:opacity-90 transition-opacity" />
+              </a>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="inline-block rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                    {issue.category}
+                  </span>
+                  <button onClick={() => deleteIssue.mutate({ id: issue.id })}
+                    className="shrink-0 text-gray-300 hover:text-red-500 transition-colors">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {issue.note && <p className="mt-1 text-sm text-gray-600">{issue.note}</p>}
+                <p className="mt-1 text-[10px] text-gray-400">
+                  {new Date(issue.created_at).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add form */}
+      {showForm && (
+        <div className="rounded-xl border border-gray-200 p-3 space-y-3 mb-3 bg-gray-50">
+          {preview && (
+            <div className="relative w-fit">
+              <img src={preview} alt="Preview" className="h-24 w-auto rounded-lg border border-gray-200 object-cover" />
+              <button onClick={resetForm}
+                className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-white hover:bg-gray-900">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+          {/* Category */}
+          {!showNewCat ? (
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <select value={category} onChange={(e) => setCategory(e.target.value)}
+                  className={cn('w-full appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2 pr-8 text-sm focus:border-brand-400 focus:outline-none', !category && 'text-gray-400')}>
+                  <option value="">Select category…</option>
+                  {allCategories.map((l) => <option key={l} value={l}>{l}</option>)}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              </div>
+              <button onClick={() => setShowNewCat(true)}
+                className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500 hover:bg-gray-50 whitespace-nowrap">
+                <Plus className="h-3.5 w-3.5" /> New
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <input autoFocus value={newCatInput} onChange={(e) => setNewCatInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && newCatInput.trim() && addCategory.mutate({ label: newCatInput.trim() })}
+                placeholder="Category name…"
+                className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none" />
+              <button onClick={() => newCatInput.trim() && addCategory.mutate({ label: newCatInput.trim() })}
+                disabled={!newCatInput.trim() || addCategory.isPending}
+                className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-40">Add</button>
+              <button onClick={() => { setShowNewCat(false); setNewCatInput('') }}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-500 hover:bg-gray-50">Cancel</button>
+            </div>
+          )}
+          {/* Note */}
+          <textarea value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder="Describe the issue… (optional)" rows={2}
+            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm placeholder-gray-400 focus:border-brand-400 focus:outline-none resize-none" />
+          <div className="flex gap-2">
+            <button onClick={resetForm}
+              className="flex-1 rounded-lg border border-gray-200 py-2 text-sm font-medium text-gray-600 hover:bg-white">Cancel</button>
+            <button onClick={handleSubmit} disabled={!file || !category || uploading || createIssue.isPending}
+              className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40">
+              {uploading ? 'Uploading…' : 'Save Issue'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Add photo button */}
+      {!showForm && (
+        <button onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-2.5 text-sm text-gray-500 hover:border-brand-400 hover:text-brand-600 transition-colors w-full justify-center">
+          <Camera className="h-4 w-4" /> Add Photo &amp; Note
+        </button>
+      )}
+
+      <input ref={fileInputRef} type="file" accept="image/*" capture="environment"
+        className="hidden" onChange={handleFileChange} />
+    </div>
+  )
+}
+
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -79,8 +248,11 @@ interface Props {
 export function OrderDetailModal({ orderId, onClose }: Props) {
   const { data: order, isLoading } = trpc.orders.getById.useQuery({ id: orderId })
   const { data: members = [] } = trpc.tenants.getMembers.useQuery()
+  const { data: myRole } = trpc.staff.myRole.useQuery()
   const [emailSent, setEmailSent] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
+  const [showCustomerProfile, setShowCustomerProfile] = useState<'orders' | 'edit' | null>(null)
+  const [showCancelModal, setShowCancelModal] = useState(false)
   const notesEndRef = useRef<HTMLDivElement>(null)
   const sendReceipt = trpc.notifications.sendReceipt.useMutation({ onSuccess: () => setEmailSent('receipt') })
   const sendInvoice = trpc.notifications.sendInvoice.useMutation({ onSuccess: () => setEmailSent('invoice') })
@@ -94,6 +266,7 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
   })
   const deleteNote = trpc.orderNotes.delete.useMutation({ onSuccess: () => refetchNotes() })
 
+
   const memberName = (userId: string | null | undefined) => {
     if (!userId) return '—'
     return members.find((m) => m.user_id === userId)?.display_name ?? '—'
@@ -101,6 +274,7 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
 
   const canEdit = order && order.status !== 'picked_up' && order.status !== 'delivered' && order.status !== 'cancelled'
   const isPending = order?.status === 'pending'
+  const canDelete = canEdit
 
   type Payment = { id: string; amount: number; method: string; status: string; processed_by: string; processed_at: string }
   type Line    = { id: string; name: string; category: string; quantity: number; unit_label: string; unit_price: number; notes?: string | null }
@@ -117,6 +291,22 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
   } | null
 
   return (
+    <>
+    {showCancelModal && order && (
+      <CancelOrderModal
+        orderId={order.id as string}
+        orderNumber={order.order_number as string}
+        onClose={() => setShowCancelModal(false)}
+        onCancelled={onClose}
+      />
+    )}
+    {showCustomerProfile && order?.customer_id && (
+      <CustomerProfilePanel
+        customerId={order.customer_id as string}
+        onClose={() => setShowCustomerProfile(null)}
+        initialTab={showCustomerProfile}
+      />
+    )}
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="relative flex w-full max-w-4xl flex-col max-h-[90vh] rounded-2xl bg-white shadow-2xl overflow-hidden">
 
@@ -144,6 +334,14 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
               >
                 Edit Order
               </Link>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setShowCancelModal(true)}
+                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-100"
+              >
+                Delete
+              </button>
             )}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -184,9 +382,18 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
                   <p className="text-xs text-gray-400">{hoursAgo(order.created_at)}</p>
                   <p className="text-sm text-gray-700 mt-1">{memberName(order.created_by as string)}</p>
                   {customer && (
-                    <p className="text-sm font-semibold text-gray-900 mt-0.5">
-                      {customer.first_name} {customer.last_name}
-                    </p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <p className="text-sm font-semibold text-gray-900">
+                        {customer.first_name} {customer.last_name}
+                      </p>
+                      <button
+                        onClick={() => setShowCustomerProfile('edit')}
+                        className="text-gray-400 hover:text-brand-600 transition-colors"
+                        aria-label="Edit customer"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -322,6 +529,11 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
                 </Section>
               )}
 
+              {/* Issues */}
+              <Section title="Issues">
+                <IssuesSection orderId={orderId} />
+              </Section>
+
               {/* Internal staff notes */}
               <Section title="Internal Notes">
                 <div className="rounded-lg border border-gray-200 overflow-hidden">
@@ -396,16 +608,26 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
                     {emailSent === 'receipt' ? 'Receipt sent ✓' : 'Send Receipt'}
                   </Button>
                 ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={sendInvoice.isPending || emailSent === 'invoice'}
-                    onClick={() => sendInvoice.mutate({ order_id: orderId })}
-                    className="gap-1.5 text-xs"
-                  >
-                    <Mail className="h-3.5 w-3.5" />
-                    {emailSent === 'invoice' ? 'Invoice sent ✓' : 'Send Invoice'}
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={sendInvoice.isPending || emailSent === 'invoice'}
+                      onClick={() => sendInvoice.mutate({ order_id: orderId })}
+                      className="gap-1.5 text-xs"
+                    >
+                      <Mail className="h-3.5 w-3.5" />
+                      {emailSent === 'invoice' ? 'Invoice sent ✓' : 'Send Invoice'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => setShowCustomerProfile('orders')}
+                      className="gap-1.5 text-xs bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      <DollarSign className="h-3.5 w-3.5" />
+                      Record Payment
+                    </Button>
+                  </>
                 )}
               </>
             )}
@@ -414,5 +636,6 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
         </div>
       </div>
     </div>
+    </>
   )
 }

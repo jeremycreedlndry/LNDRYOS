@@ -32,40 +32,86 @@ async function helcimFetch<T = unknown>(
   return json as T
 }
 
-// ─── HelcimPay.js initialization ─────────────────────────────────────────────
+// ─── Shared result type ───────────────────────────────────────────────────────
 
-export interface HelcimPaySession {
-  checkoutToken: string
-  secretToken:   string
+export interface HelcimChargeResult {
+  transactionId:  number | string
+  status:         string   // 'APPROVED' | 'DECLINED' | 'PENDING' | etc.
+  approvalCode?:  string
+  cardToken?:     string
+  cardNumber?:    string   // last 4 digits
+  cardType?:      string   // visa, mastercard, etc.
+  amount?:        number
 }
 
-export async function initializeHelcimPay(params: {
-  amountCents:   number
-  currency?:     string
-  customerCode?: string
-}): Promise<HelcimPaySession> {
-  return helcimFetch<HelcimPaySession>('/helcim-pay/initialize', {
+// ─── List terminals ───────────────────────────────────────────────────────────
+
+export interface HelcimTerminal {
+  terminalId:   number | string
+  terminalName: string
+  status:       string
+  currency:     string
+}
+
+export async function listTerminals(): Promise<HelcimTerminal[]> {
+  const res = await helcimFetch<{ terminals?: HelcimTerminal[] }>('/terminals')
+  return res.terminals ?? []
+}
+
+// ─── Keyed card entry (card-not-present, sandbox/phone orders) ────────────────
+
+export async function purchaseWithCard(params: {
+  amountCents:    number
+  cardNumber:     string
+  cardExpiry:     string   // MMYY
+  cardCVV:        string
+  cardHolderName?: string
+  saveCard?:      boolean
+  customerCode?:  string
+  idempotencyKey: string
+  currency?:      string
+  ipAddress?:     string
+}): Promise<HelcimChargeResult> {
+  return helcimFetch<HelcimChargeResult>('/payment/purchase', {
     method: 'POST',
+    idempotencyKey: params.idempotencyKey,
     body: JSON.stringify({
-      paymentType:  'purchase',
-      amount:       +(params.amountCents / 100).toFixed(2),
+      ipAddress:    params.ipAddress ?? '127.0.0.1',
       currency:     params.currency ?? 'CAD',
+      amount:       +(params.amountCents / 100).toFixed(2),
+      ...(params.saveCard ? { saveCard: 1 } : {}),
       ...(params.customerCode ? { customerCode: params.customerCode } : {}),
+      cardData: {
+        cardNumber:     params.cardNumber.replace(/\s/g, ''),
+        cardExpiry:     params.cardExpiry.replace(/\D/g, ''),
+        cardCVV:        params.cardCVV,
+        ...(params.cardHolderName ? { cardHolderName: params.cardHolderName } : {}),
+      },
     }),
   })
 }
 
-// ─── Charge a saved card token (server-side, no customer interaction) ─────────
+// ─── Terminal purchase (card-present, physical device) ───────────────────────
+// Helcim activates the terminal; poll getTransaction() for the result.
 
-export interface HelcimChargeResult {
-  transactionId: number | string
-  status:        string
-  approvalCode?: string
-  cardToken?:    string
-  cardNumber?:   string   // last 4
-  cardType?:     string   // visa, mastercard, etc.
-  amount?:       number
+export async function purchaseWithTerminal(params: {
+  amountCents:    number
+  terminalId:     string | number
+  idempotencyKey: string
+  currency?:      string
+}): Promise<HelcimChargeResult> {
+  return helcimFetch<HelcimChargeResult>('/payment/purchase', {
+    method: 'POST',
+    idempotencyKey: params.idempotencyKey,
+    body: JSON.stringify({
+      currency:   params.currency ?? 'CAD',
+      amount:     +(params.amountCents / 100).toFixed(2),
+      terminalId: Number(params.terminalId),
+    }),
+  })
 }
+
+// ─── Charge a saved card token ────────────────────────────────────────────────
 
 export async function chargeCardToken(params: {
   amountCents:    number
@@ -88,8 +134,41 @@ export async function chargeCardToken(params: {
   })
 }
 
-// ─── Fetch a transaction (for server-side verification) ────────────────────────
+// ─── Fetch / poll a transaction ───────────────────────────────────────────────
 
-export async function getTransaction(transactionId: string | number) {
-  return helcimFetch(`/card-transactions/${transactionId}`)
+export interface HelcimTransaction {
+  transactionId: number | string
+  status:        string
+  approvalCode?: string
+  cardToken?:    string
+  cardNumber?:   string
+  cardType?:     string
+  amount?:       number
+}
+
+export async function getTransaction(transactionId: string | number): Promise<HelcimTransaction> {
+  return helcimFetch<HelcimTransaction>(`/card-transactions/${transactionId}`)
+}
+
+// ─── HelcimPay.js initialization (kept for reference) ────────────────────────
+
+export interface HelcimPaySession {
+  checkoutToken: string
+  secretToken:   string
+}
+
+export async function initializeHelcimPay(params: {
+  amountCents:   number
+  currency?:     string
+  customerCode?: string
+}): Promise<HelcimPaySession> {
+  return helcimFetch<HelcimPaySession>('/helcim-pay/initialize', {
+    method: 'POST',
+    body: JSON.stringify({
+      paymentType:  'purchase',
+      amount:       +(params.amountCents / 100).toFixed(2),
+      currency:     params.currency ?? 'CAD',
+      ...(params.customerCode ? { customerCode: params.customerCode } : {}),
+    }),
+  })
 }

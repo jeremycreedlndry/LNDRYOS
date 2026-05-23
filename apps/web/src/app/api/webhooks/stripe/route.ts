@@ -1,3 +1,7 @@
+/**
+ * Stripe webhook handler — SaaS subscription billing only.
+ * Order payment is handled by Helcim (/api/webhooks/helcim).
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createSupabaseServiceClient } from '@laundry/db'
@@ -24,8 +28,8 @@ export async function POST(req: NextRequest) {
       const session = event.data.object as Stripe.Checkout.Session
       const tenantId = session.metadata?.tenant_id
       const plan = session.metadata?.plan
-      const orderId = session.metadata?.order_id
 
+      // Only handle SaaS plan upgrades (not order payments — those use Helcim)
       if (tenantId && plan) {
         await supabase
           .from('tenants')
@@ -37,40 +41,6 @@ export async function POST(req: NextRequest) {
             updated_at: new Date().toISOString(),
           })
           .eq('id', tenantId)
-      }
-
-      // Online order payment via pay link
-      if (orderId && tenantId && session.amount_total) {
-        await supabase.from('payments').insert({
-          tenant_id: tenantId,
-          order_id: orderId,
-          amount: session.amount_total,
-          method: 'card_online',
-          status: 'paid',
-          stripe_payment_intent_id: session.payment_intent as string ?? null,
-          processed_at: new Date().toISOString(),
-        })
-
-        // Recalculate paid_amount and payment_status
-        const { data: payments } = await supabase
-          .from('payments')
-          .select('amount')
-          .eq('order_id', orderId)
-          .eq('status', 'paid')
-
-        const { data: order } = await supabase
-          .from('orders')
-          .select('total_amount')
-          .eq('id', orderId)
-          .single()
-
-        const paidAmount = (payments ?? []).reduce((s: number, p: { amount: number }) => s + p.amount, 0)
-        const paymentStatus = order && paidAmount >= order.total_amount ? 'paid' : 'partial'
-
-        await supabase
-          .from('orders')
-          .update({ paid_amount: paidAmount, payment_status: paymentStatus, updated_at: new Date().toISOString() })
-          .eq('id', orderId)
       }
       break
     }
@@ -93,24 +63,6 @@ export async function POST(req: NextRequest) {
         .from('tenants')
         .update({ status: 'cancelled', updated_at: new Date().toISOString() })
         .eq('stripe_subscription_id', sub.id)
-      break
-    }
-
-    case 'payment_intent.succeeded': {
-      const pi = event.data.object as Stripe.PaymentIntent
-      await supabase
-        .from('payments')
-        .update({ status: 'paid' })
-        .eq('stripe_payment_intent_id', pi.id)
-      break
-    }
-
-    case 'payment_intent.payment_failed': {
-      const pi = event.data.object as Stripe.PaymentIntent
-      await supabase
-        .from('payments')
-        .update({ status: 'failed' })
-        .eq('stripe_payment_intent_id', pi.id)
       break
     }
   }

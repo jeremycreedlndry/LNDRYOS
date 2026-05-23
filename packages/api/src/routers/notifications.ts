@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, tenantProcedure } from '../trpc'
-import { sendEmail, receiptEmail, invoiceEmail, APP_URL } from '../lib/email'
+import { sendEmail, receiptEmail, orderInvoiceEmail, APP_URL } from '../lib/email'
 
 export const notificationsRouter = router({
   // Send a receipt email for a paid order
@@ -88,7 +88,7 @@ export const notificationsRouter = router({
 
       const paymentLink = `${APP_URL}/pay/${order.id}?t=${order.payment_token}`
 
-      const { subject, html } = invoiceEmail({
+      const { subject, html } = orderInvoiceEmail({
         storeName,
         storePhone,
         customerName,

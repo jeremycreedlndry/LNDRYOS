@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { X, ShoppingCart, ArrowLeft, Truck } from 'lucide-react'
+import { X, ShoppingCart, ArrowLeft, Truck, Trash2 } from 'lucide-react'
 import { CustomerSearch } from '@/components/pos/CustomerSearch'
 import { ServiceGrid } from '@/components/pos/ServiceGrid'
 import { OrderCart, type CartLine } from '@/components/pos/OrderCart'
@@ -12,6 +12,7 @@ import { SchedulePickupModal } from '@/components/pos/SchedulePickupModal'
 import { CustomItemModal } from '@/components/pos/CustomItemModal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { CancelOrderModal } from '@/components/orders/CancelOrderModal'
 import { trpc } from '@/lib/trpc'
 import { formatCurrency } from '@/lib/utils'
 import type { Customer, ServiceItem, ItemCategory } from '@laundry/db'
@@ -21,17 +22,77 @@ import toast from 'react-hot-toast'
 
 const QUICK_AMOUNTS = [2500, 5000, 10000, 15000, 20000, 25000]
 
+interface GiftCardConfirmPayload {
+  item: ServiceItem
+  amountCents: number
+  cardDisplayNumber?: string
+  cardUid?: string
+}
+
 function GiftCardPrompt({ item, onConfirm, onCancel }: {
   item: ServiceItem
-  onConfirm: (item: ServiceItem, amountCents: number) => void
+  onConfirm: (payload: GiftCardConfirmPayload) => void
   onCancel: () => void
 }) {
+  const isPhysical = item.name.toLowerCase().includes('physical')
   const [value, setValue] = useState('')
+  const [cardNumber, setCardNumber] = useState('')
+
+  // Nayax card lookup — fires automatically when card number is 10 digits
+  const {
+    data: cardInfo,
+    isFetching: cardLookingUp,
+    error: cardError,
+  } = trpc.nayax.lookupGiftCard.useQuery(
+    { display_number: cardNumber },
+    { enabled: isPhysical && cardNumber.replace(/\D/g, '').length === 10, retry: false }
+  )
+
   const cents = Math.round(parseFloat(value) * 100) || 0
+  const cardReady = !isPhysical || (cardInfo?.card_unique_identifier && !cardLookingUp)
+
   const confirm = () => {
     if (cents <= 0) { toast.error('Enter a valid amount'); return }
-    onConfirm(item, cents)
+    if (isPhysical && !cardInfo?.card_unique_identifier) {
+      toast.error('Enter a valid 10-digit card number first')
+      return
+    }
+    onConfirm({
+      item,
+      amountCents: cents,
+      cardDisplayNumber: cardInfo?.display_number,
+      cardUid: cardInfo?.card_unique_identifier,
+    })
   }
+
+  const balanceLine = () => {
+    if (!isPhysical) return null
+    const digits = cardNumber.replace(/\D/g, '')
+    if (digits.length === 0) return null
+    if (digits.length < 10) return (
+      <p className="text-xs text-gray-400">{10 - digits.length} more digit{10 - digits.length !== 1 ? 's' : ''} needed</p>
+    )
+    if (cardLookingUp) return (
+      <p className="text-xs text-gray-400 animate-pulse">Looking up card…</p>
+    )
+    if (cardError) return (
+      <p className="text-xs text-red-500">Card not found — check the number and try again</p>
+    )
+    if (cardInfo) {
+      const bal = cardInfo.balance_dollars
+      return bal === null ? (
+        <p className="text-xs text-green-600 font-medium">✓ Card verified</p>
+      ) : bal === 0 ? (
+        <p className="text-xs text-green-600 font-medium">✓ New card — $0.00 balance</p>
+      ) : (
+        <p className="text-xs text-amber-600 font-medium">
+          ⚠ Card already has ${bal.toFixed(2)} loaded
+        </p>
+      )
+    }
+    return null
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl">
@@ -40,12 +101,41 @@ function GiftCardPrompt({ item, onConfirm, onCancel }: {
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
         </div>
         <div className="p-6 space-y-4">
+          {/* Card number field — physical only */}
+          {isPhysical && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Card Number <span className="text-gray-400 font-normal">(10-digit number on card)</span>
+              </label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                maxLength={10}
+                value={cardNumber}
+                onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                placeholder="0000000000"
+                className="h-11 text-center font-mono text-lg tracking-widest"
+                autoFocus
+              />
+              <div className="mt-1 min-h-[1.25rem]">{balanceLine()}</div>
+            </div>
+          )}
+
+          {/* Amount */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Amount ($)</label>
-            <Input type="number" inputMode="decimal" step="0.01" min="1" value={value}
-              onChange={(e) => setValue(e.target.value)} placeholder="0.00"
-              className="text-xl h-12 text-center font-semibold" autoFocus
-              onKeyDown={(e) => e.key === 'Enter' && confirm()} />
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="1"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="0.00"
+              className="text-xl h-12 text-center font-semibold"
+              autoFocus={!isPhysical}
+              onKeyDown={(e) => e.key === 'Enter' && confirm()}
+            />
           </div>
           <div className="grid grid-cols-3 gap-2">
             {QUICK_AMOUNTS.map((amt) => (
@@ -57,7 +147,9 @@ function GiftCardPrompt({ item, onConfirm, onCancel }: {
           </div>
           <div className="flex gap-2 pt-1">
             <Button variant="outline" onClick={onCancel} className="flex-1">Cancel</Button>
-            <Button onClick={confirm} disabled={cents <= 0} className="flex-1">Add to order</Button>
+            <Button onClick={confirm} disabled={cents <= 0 || !cardReady} className="flex-1">
+              Add to order
+            </Button>
           </div>
         </div>
       </div>
@@ -118,13 +210,16 @@ function POSInner() {
   const [cartLines, setCartLines] = useState<CartLine[]>([])
   const [activeCategory, setActiveCategory] = useState<ItemCategory>('wash_fold')
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null)
+  const [paymentOrderNumber, setPaymentOrderNumber] = useState<string | null>(null)
   const [orderTotal, setOrderTotal] = useState(0)
   const [giftCardPrompt, setGiftCardPrompt] = useState<ServiceItem | null>(null)
   const [bagEntryItem, setBagEntryItem] = useState<ServiceItem | null>(null)
+  const [pendingPrefs, setPendingPrefs] = useState<Record<string, string> | null>(null)
   const [mobileCartOpen, setMobileCartOpen] = useState(false)
   const [schedulePickupOpen, setSchedulePickupOpen] = useState(false)
   const [customItemOpen, setCustomItemOpen] = useState(false)
   const [initialized, setInitialized] = useState(false)
+  const [showCancelModal, setShowCancelModal] = useState(false)
 
   // Load existing order when in edit mode
   const { data: editOrder } = trpc.orders.getById.useQuery(
@@ -159,6 +254,8 @@ function POSInner() {
   }
 
   const { data: tenantSettings } = trpc.tenants.getCurrent.useQuery()
+  const { data: myRole } = trpc.staff.myRole.useQuery()
+  const canDelete = isEditMode && editOrder && editOrder.status !== 'cancelled'
   const utils = trpc.useUtils()
   const ensureGiftCards = trpc.catalog.ensureGiftCards.useMutation({
     onSuccess: () => utils.catalog.list.invalidate(),
@@ -167,11 +264,28 @@ function POSInner() {
 
   const taxRate = (tenantSettings?.settings as { tax_rate?: number })?.tax_rate ?? 0
 
+  const saveCustomerPrefs = trpc.customers.update.useMutation()
+
   const createOrder = trpc.orders.create.useMutation({
     onSuccess: (order) => {
       setPaymentOrderId(order.id as string)
+      setPaymentOrderNumber(order.order_number as string)
       setOrderTotal(order.total_amount as number)
       setMobileCartOpen(false)
+      // Save order preferences back to customer profile so they persist
+      if (customer?.id && pendingPrefs && Object.keys(pendingPrefs).length > 0) {
+        saveCustomerPrefs.mutate({
+          id: customer.id,
+          order_preferences: {
+            bleach:           pendingPrefs.bleach,
+            dryer_sheets:     pendingPrefs.dryer_sheets,
+            detergent_type:   pendingPrefs.detergent_type,
+            fabric_softener:  pendingPrefs.fabric_softener,
+            wash_temperature: pendingPrefs.wash_temperature,
+          },
+        })
+      }
+      setPendingPrefs(null)
     },
     onError: (e) => toast.error(e.message),
   })
@@ -184,6 +298,8 @@ function POSInner() {
     },
     onError: (e) => toast.error(e.message),
   })
+
+  const loadGiftCard = trpc.nayax.loadGiftCard.useMutation()
 
   const addToCart = useCallback((item: ServiceItem, overridePrice?: number) => {
     const unit_price = overridePrice ?? item.unit_price
@@ -207,10 +323,22 @@ function POSInner() {
     addToCart(item)
   }, [addToCart])
 
-  const handleGiftCardConfirm = useCallback((item: ServiceItem, amountCents: number) => {
-    addToCart(item, amountCents)
+  const handleGiftCardConfirm = useCallback(({ item, amountCents, cardDisplayNumber, cardUid }: GiftCardConfirmPayload) => {
+    const key = `${item.id}-${Date.now()}`
+    setCartLines((prev) => [...prev, {
+      key,
+      service_item_id: item.id,
+      name: item.name,
+      category: item.category as ItemCategory,
+      quantity: 1,
+      unit_price: amountCents,
+      unit_label: 'item',
+      ...(cardDisplayNumber ? { notes: `Card: ${cardDisplayNumber}` } : {}),
+      gift_card_display_number: cardDisplayNumber,
+      gift_card_uid: cardUid,
+    }])
     setGiftCardPrompt(null)
-  }, [addToCart])
+  }, [])
 
   const handleUpdateQty = useCallback((key: string, qty: number) => {
     if (qty <= 0) setCartLines((prev) => prev.filter((l) => l.key !== key))
@@ -246,15 +374,44 @@ function POSInner() {
     }
   }, [customer, cartLines, taxRate, createOrder, updateOrder, isEditMode, editOrderId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handlePaymentComplete = useCallback(() => {
+  const handlePaymentComplete = useCallback(async () => {
+    // Load funds onto any physical gift cards in the order
+    const physicalGiftCards = cartLines.filter(
+      (l) => l.category === 'gift_card' && l.gift_card_uid
+    )
+    for (const line of physicalGiftCards) {
+      const amountCents = Math.round(line.quantity * line.unit_price)
+      try {
+        const result = await loadGiftCard.mutateAsync({
+          card_unique_identifier: line.gift_card_uid!,
+          amount_cents: amountCents,
+          order_number: paymentOrderNumber ?? undefined,
+        })
+        const newBal = result.new_balance_dollars != null
+          ? ` — new balance $${result.new_balance_dollars.toFixed(2)}`
+          : ''
+        toast.success(`Gift card loaded: $${(amountCents / 100).toFixed(2)}${newBal}`)
+      } catch (err) {
+        toast.error(
+          `Payment taken but gift card load failed — please load manually.\n` +
+          `Card: ${line.gift_card_display_number}, Amount: $${(amountCents / 100).toFixed(2)}`
+        )
+        console.error('[gift card load]', err)
+      }
+    }
+
     setPaymentOrderId(null)
+    setPaymentOrderNumber(null)
     setCartLines([])
     setCustomer(null)
-    toast.success('Order complete!')
-  }, [])
+    if (physicalGiftCards.length === 0) toast.success('Order complete!')
+  }, [cartLines, paymentOrderNumber, loadGiftCard])
 
   const cartSubtotal = cartLines.reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
-  const cartTotal = cartSubtotal + Math.round(cartSubtotal * taxRate)
+  const cartTaxableSubtotal = cartLines
+    .filter((l) => l.category !== 'gift_card')
+    .reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
+  const cartTotal = cartSubtotal + Math.round(cartTaxableSubtotal * taxRate)
   const cartItemCount = cartLines.reduce((s, l) => s + (l.unit_label === 'lb' ? 1 : l.quantity), 0)
   const isSubmitting = createOrder.isPending || updateOrder.isPending
 
@@ -306,9 +463,20 @@ function POSInner() {
             <h2 className="text-sm font-semibold text-gray-900">
               {isEditMode ? 'Updated Order' : 'Order'}
             </h2>
-            {cartLines.length > 0 && (
-              <button onClick={() => setCartLines([])} className="text-xs text-gray-400 hover:text-red-500">Clear</button>
-            )}
+            <div className="flex items-center gap-2">
+              {canDelete && (
+                <button
+                  onClick={() => setShowCancelModal(true)}
+                  className="flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-100"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Delete
+                </button>
+              )}
+              {cartLines.length > 0 && (
+                <button onClick={() => setCartLines([])} className="text-xs text-gray-400 hover:text-red-500">Clear</button>
+              )}
+            </div>
           </div>
           <OrderCart lines={cartLines} taxRate={taxRate} discountCents={0}
             hasCustomer={!!customer} onUpdateQuantity={handleUpdateQty}
@@ -365,8 +533,12 @@ function POSInner() {
       )}
 
       {bagEntryItem && (
-        <BagEntryModal item={bagEntryItem}
-          onSubmit={(lines) => { setCartLines((prev) => [...prev, ...lines]); setBagEntryItem(null) }}
+        <BagEntryModal item={bagEntryItem} customerId={customer?.id ?? null}
+          onSubmit={(lines, prefs) => {
+            setCartLines((prev) => [...prev, ...lines])
+            if (Object.keys(prefs).length > 0) setPendingPrefs(prefs)
+            setBagEntryItem(null)
+          }}
           onCancel={() => setBagEntryItem(null)} />
       )}
 
@@ -388,6 +560,15 @@ function POSInner() {
       {schedulePickupOpen && (
         <SchedulePickupModal
           onClose={() => setSchedulePickupOpen(false)}
+        />
+      )}
+
+      {showCancelModal && editOrderId && editOrder && (
+        <CancelOrderModal
+          orderId={editOrderId}
+          orderNumber={editOrder.order_number as string}
+          onClose={() => setShowCancelModal(false)}
+          onCancelled={() => router.push('/orders')}
         />
       )}
 

@@ -1,22 +1,49 @@
 'use client'
 
-import { useState } from 'react'
-import { X } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { X, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { trpc } from '@/lib/trpc'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { ServiceItem } from '@laundry/db'
+import type { ServiceItem, TenantSettings, OrderPreferenceOptions } from '@laundry/db'
 import type { CartLine } from './OrderCart'
 import toast from 'react-hot-toast'
 
+const PREF_GROUP_LABELS: Record<string, string> = {
+  bleach:           'Bleach',
+  dryer_sheets:     'Dryer Sheets',
+  detergent_type:   'Detergent Type',
+  fabric_softener:  'Fabric Softener',
+  wash_temperature: 'Wash Temperature',
+}
+
+// Default options shown when tenant hasn't customised them yet in Settings → Preferences
+const PREF_DEFAULTS: Record<string, string[]> = {
+  bleach:           ['Yes', 'No', 'Whites Only', 'Delicates Only'],
+  dryer_sheets:     ['Yes', 'No', 'Fragrance Free'],
+  detergent_type:   ['Store Default', 'HE', 'Sensitive', 'Fragrance Free', 'Pods'],
+  fabric_softener:  ['Yes', 'No', 'Fragrance Free'],
+  wash_temperature: ['Cold', 'Warm', 'Hot'],
+}
+
 interface Props {
   item: ServiceItem
-  onSubmit: (lines: CartLine[]) => void
+  customerId?: string | null
+  onSubmit: (lines: CartLine[], prefs: Record<string, string>) => void
   onCancel: () => void
 }
 
-export function BagEntryModal({ item, onSubmit, onCancel }: Props) {
+export function BagEntryModal({ item, customerId, onSubmit, onCancel }: Props) {
+  const prefGroups = (item.preference_groups as string[] | null) ?? []
+  const hasPrefs = prefGroups.length > 0
+
+  // step: 'prefs' (if needed) → 'weight'
+  const [step, setStep] = useState<'prefs' | 'weight'>(hasPrefs ? 'prefs' : 'weight')
+
+  // Selected preference values keyed by group
+  const [selectedPrefs, setSelectedPrefs] = useState<Record<string, string>>({})
+
   const [mode, setMode] = useState<'per_bag' | 'split'>('per_bag')
 
   // Per-bag mode state
@@ -34,6 +61,30 @@ export function BagEntryModal({ item, onSubmit, onCancel }: Props) {
   const { data: allItems = [] } = trpc.catalog.list.useQuery()
   const upcharges = allItems.filter((i) => i.category === 'upcharge' && i.is_active)
 
+  // Tenant preference options
+  const { data: tenant } = trpc.tenants.getCurrent.useQuery(undefined, { enabled: hasPrefs })
+  const prefOptions = (tenant?.settings as TenantSettings | null)?.order_preference_options as OrderPreferenceOptions | undefined
+
+  // Pre-populate from customer's last order for this service
+  const { data: lastOrderPrefs } = trpc.orders.lastPrefsForService.useQuery(
+    { customerId: customerId!, serviceItemId: item.id },
+    { enabled: hasPrefs && !!customerId }
+  )
+
+  // Parse the notes string back into {groupKey: value} once prefOptions is loaded
+  useEffect(() => {
+    if (!lastOrderPrefs?.notesString || !prefOptions || Object.keys(selectedPrefs).length > 0) return
+    const parts = lastOrderPrefs.notesString.split(' · ')
+    const result: Record<string, string> = {}
+    for (const groupKey of prefGroups) {
+      const opts = (prefOptions?.[groupKey as keyof OrderPreferenceOptions] as string[] | undefined) ?? []
+      for (const part of parts) {
+        if (opts.includes(part)) { result[groupKey] = part; break }
+      }
+    }
+    if (Object.keys(result).length > 0) setSelectedPrefs(result)
+  }, [lastOrderPrefs, prefOptions]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggleUpcharge = (id: string) =>
     setSelectedUpchargeIds((prev) => {
       const next = new Set(prev)
@@ -45,7 +96,11 @@ export function BagEntryModal({ item, onSubmit, onCancel }: Props) {
 
   const buildBagLines = (bagNum: number, w: number): CartLine[] => {
     const bagLabel = `· Bag ${bagNum}`
-    const bagNotes = [wetWeight ? 'Wet weight' : '', notes.trim()].filter(Boolean).join(' · ') || undefined
+    const prefNote = prefGroups
+      .filter((g) => selectedPrefs[g])
+      .map((g) => selectedPrefs[g])
+      .join(' · ')
+    const bagNotes = [prefNote, wetWeight ? 'Wet weight' : '', notes.trim()].filter(Boolean).join(' · ') || undefined
 
     const lines: CartLine[] = [{
       key: `${item.id}-bag${bagNum}-${Date.now()}`,
@@ -89,7 +144,7 @@ export function BagEntryModal({ item, onSubmit, onCancel }: Props) {
     const currentLines = w > 0 ? buildBagLines(bagNumber, w) : []
     const finalLines = [...accumulatedLines, ...currentLines]
     if (finalLines.length === 0) { toast.error('Enter a weight for at least one bag'); return }
-    onSubmit(finalLines)
+    onSubmit(finalLines, selectedPrefs)
   }
 
   // ── Split helpers ─────────────────────────────────────────────────────────
@@ -105,7 +160,7 @@ export function BagEntryModal({ item, onSubmit, onCancel }: Props) {
     for (let i = 1; i <= splitBagCount; i++) {
       lines.push(...buildBagLines(i, perBag))
     }
-    onSubmit(lines)
+    onSubmit(lines, selectedPrefs)
   }
 
   const bagsAdded = bagNumber - 1
@@ -118,19 +173,60 @@ export function BagEntryModal({ item, onSubmit, onCancel }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Enter Weight</h2>
-            {mode === 'per_bag' && (
-              <p className="text-xs text-gray-400 mt-0.5">
-                {bagsAdded === 0
-                  ? 'Bag 1'
-                  : `Bag ${bagNumber} · ${bagsAdded} bag${bagsAdded > 1 ? 's' : ''} added · ${totalWeightSoFar.toFixed(1)} lbs total`}
-              </p>
-            )}
+            <h2 className="text-base font-semibold text-gray-900">
+              {step === 'prefs' ? 'Order Preferences' : 'Enter Weight'}
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {step === 'prefs'
+                ? item.name
+                : mode === 'per_bag'
+                  ? bagsAdded === 0 ? 'Bag 1' : `Bag ${bagNumber} · ${bagsAdded} bag${bagsAdded > 1 ? 's' : ''} added · ${totalWeightSoFar.toFixed(1)} lbs total`
+                  : item.name
+              }
+            </p>
           </div>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
             <X className="h-5 w-5" />
           </button>
         </div>
+
+        {/* ── Step 1: Order Preferences ── */}
+        {step === 'prefs' && (
+          <div className="p-6 space-y-5">
+            {prefGroups.map((groupKey) => {
+              const label = PREF_GROUP_LABELS[groupKey] ?? groupKey
+              const opts = (prefOptions?.[groupKey as keyof OrderPreferenceOptions] as string[] | undefined)
+                ?? PREF_DEFAULTS[groupKey]
+                ?? []
+              return (
+                <div key={groupKey}>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">{label}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {opts.map((opt) => (
+                      <button key={opt} type="button"
+                        onClick={() => setSelectedPrefs((p) => ({ ...p, [groupKey]: p[groupKey] === opt ? '' : opt }))}
+                        className={cn('rounded-xl border-2 px-3 py-2 text-sm font-medium transition-colors',
+                          selectedPrefs[groupKey] === opt
+                            ? 'border-brand-500 bg-brand-50 text-brand-700'
+                            : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                        )}>
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" onClick={onCancel} className="flex-1">Cancel</Button>
+              <Button onClick={() => setStep('weight')} className="flex-1 bg-brand-600 hover:bg-brand-700 text-white">
+                Next <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === 'weight' && (<>
 
         {/* Mode toggle */}
         <div className="flex border-b border-gray-100">
@@ -247,6 +343,7 @@ export function BagEntryModal({ item, onSubmit, onCancel }: Props) {
             </>
           )}
         </div>
+        </>)}
       </div>
     </div>
   )

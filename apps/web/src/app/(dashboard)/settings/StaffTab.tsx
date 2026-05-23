@@ -209,7 +209,8 @@ function LastMachineUsed({ memberId }: { memberId: string }) {
     return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) + ' ' + fmtTime(iso)
   }
 
-  const MachineIcon = data?.equipment?.type === 'dryer' ? Wind : WashingMachine
+  const firstEquip = Array.isArray(data?.equipment) ? data.equipment[0] : data?.equipment
+  const MachineIcon = firstEquip?.type === 'dryer' ? Wind : WashingMachine
 
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 space-y-2">

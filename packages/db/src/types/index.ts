@@ -84,8 +84,10 @@ export interface TenantSettings {
   tax_rate?: number
   tax_name?: string
   tax_id?: string
+  logo_url?: string
   phone?: string
   website_url?: string
+  etransfer_email?: string   // e-Transfer payment destination shown on invoices
   offers_pickup_delivery?: boolean
   offers_wash_fold?: boolean
   hours?: Record<string, { enabled: boolean; open: string; close: string }>
@@ -217,6 +219,7 @@ export interface ServiceItem {
   unit_label: string
   is_active: boolean
   sort_order: number
+  preference_groups: string[] | null
   created_at: string
 }
 

@@ -11,6 +11,22 @@ const orderPreferencesSchema = z.object({
   wash_temperature: z.string().optional(),
 })
 
+export const notificationTopicsSchema = z.object({
+  order_confirmed:  z.boolean().default(true),
+  order_ready:      z.boolean().default(true),
+  pickup_reminder:  z.boolean().default(true),
+  billing:          z.boolean().default(true),
+})
+
+export type NotificationTopics = z.infer<typeof notificationTopicsSchema>
+
+export const DEFAULT_NOTIFICATION_TOPICS: NotificationTopics = {
+  order_confirmed: true,
+  order_ready:     true,
+  pickup_reminder: true,
+  billing:         true,
+}
+
 const customerSchema = z.object({
   first_name: z.string().min(1),
   last_name: z.string().default(''),
@@ -36,6 +52,7 @@ const customerSchema = z.object({
   saved_card_brand:   z.string().nullable().optional(),
   delivery_fee_cents: z.number().int().nonnegative().default(0),
   notification_preference: z.enum(['sms', 'email', 'sms_email', 'none']).default('sms_email'),
+  notification_topics: notificationTopicsSchema.default(DEFAULT_NOTIFICATION_TOPICS),
 })
 
 export const customersRouter = router({
@@ -95,6 +112,22 @@ export const customersRouter = router({
   create: tenantProcedure
     .input(customerSchema)
     .mutation(async ({ ctx, input }) => {
+      // Check for duplicate phone number within this tenant
+      if (input.phone) {
+        const { data: existing } = await ctx.supabase
+          .from('customers')
+          .select('id, first_name, last_name')
+          .eq('tenant_id', ctx.tenantId)
+          .eq('phone', input.phone)
+          .maybeSingle()
+        if (existing) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `Phone number already in use by ${existing.first_name} ${existing.last_name}`,
+          })
+        }
+      }
+
       const geo = await maybeGeocode(input, ctx.tenantId, ctx.supabase)
       const { data, error } = await ctx.supabase
         .from('customers')
@@ -110,6 +143,24 @@ export const customersRouter = router({
     .input(z.object({ id: z.string().uuid() }).merge(customerSchema.partial()))
     .mutation(async ({ ctx, input }) => {
       const { id, ...rest } = input
+
+      // Check for duplicate phone number (exclude this customer)
+      if (rest.phone) {
+        const { data: existing } = await ctx.supabase
+          .from('customers')
+          .select('id, first_name, last_name')
+          .eq('tenant_id', ctx.tenantId)
+          .eq('phone', rest.phone)
+          .neq('id', id)
+          .maybeSingle()
+        if (existing) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `Phone number already in use by ${existing.first_name} ${existing.last_name}`,
+          })
+        }
+      }
+
       const geo = await maybeGeocode(rest, ctx.tenantId, ctx.supabase)
       const { data, error } = await ctx.supabase
         .from('customers')
@@ -136,18 +187,47 @@ export const customersRouter = router({
     }),
 
   getOrderHistory: tenantProcedure
-    .input(z.object({ customerId: z.string().uuid(), limit: z.number().default(20) }))
+    .input(z.object({ customerId: z.string().uuid(), limit: z.number().default(50) }))
     .query(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('orders')
-        .select('id, order_number, status, payment_status, total_amount, created_at')
+        .select('id, order_number, status, payment_status, total_amount, paid_amount, created_at, ready_at, due_date, notes, lines:order_lines(name, category, quantity, unit_label, unit_price)')
         .eq('customer_id', input.customerId)
         .eq('tenant_id', ctx.tenantId)
         .order('created_at', { ascending: false })
         .limit(input.limit)
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
-      return data
+      return data ?? []
+    }),
+
+  getCustomerPayments: tenantProcedure
+    .input(z.object({ customerId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      // Get all order IDs for this customer
+      const { data: orders } = await ctx.supabase
+        .from('orders')
+        .select('id, order_number')
+        .eq('customer_id', input.customerId)
+        .eq('tenant_id', ctx.tenantId)
+
+      if (!orders?.length) return []
+
+      const orderIds = orders.map((o) => o.id)
+      const orderMap = Object.fromEntries(orders.map((o) => [o.id, o.order_number]))
+
+      const { data: payments, error } = await ctx.supabase
+        .from('payments')
+        .select('id, order_id, amount, method, payment_status, processed_at, processed_by, notes')
+        .in('order_id', orderIds)
+        .order('processed_at', { ascending: false })
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+
+      return (payments ?? []).map((p) => ({
+        ...p,
+        order_number: orderMap[p.order_id] ?? null,
+      }))
     }),
 })
 

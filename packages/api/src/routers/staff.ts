@@ -103,6 +103,19 @@ export const staffRouter = router({
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
     }),
 
+  myRole: tenantProcedure.query(async ({ ctx }) => {
+    const { data } = await ctx.supabase
+      .from('tenant_members')
+      .select('role, permissions')
+      .eq('tenant_id', ctx.tenantId)
+      .eq('user_id', ctx.userId)
+      .maybeSingle()
+    const role  = (data?.role  as string | undefined) ?? 'staff'
+    const perms = (data?.permissions ?? {}) as Record<string, unknown>
+    const canDeleteOrders = role === 'owner' || role === 'manager' || perms.delete_orders === true
+    return { role, permissions: perms, canDeleteOrders }
+  }),
+
   myStatus: tenantProcedure.query(async ({ ctx }) => {
     const { data } = await ctx.supabase
       .from('time_entries')

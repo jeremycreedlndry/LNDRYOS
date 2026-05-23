@@ -1,11 +1,63 @@
 /**
  * Called by the pay page after HelcimPay.js fires a successful payment event.
- * Records the payment, optionally saves the card token on the customer.
+ *
+ * Supports two flows:
+ *   - Order payment:  { order_id, payment_token, transaction_id, amount_cents, ... }
+ *   - Invoice payment: { invoice_id, transaction_id, amount_cents }
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServiceClient } from '@laundry/db'
 
 export async function POST(req: NextRequest) {
+  const body = await req.json()
+
+  const supabase = createSupabaseServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  )
+
+  // ── Invoice payment flow ──────────────────────────────────────────────────
+  if (body.invoice_id) {
+    const { invoice_id, transaction_id, amount_cents } = body
+
+    const { data: inv, error: invErr } = await supabase
+      .from('invoices')
+      .select('id, tenant_id, total_cents, status')
+      .eq('id', invoice_id)
+      .single()
+
+    if (invErr || !inv) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
+    if (inv.status === 'paid')  return NextResponse.json({ ok: true }) // idempotent
+
+    const paidCents = amount_cents ?? inv.total_cents
+
+    const { error: updErr } = await supabase
+      .from('invoices')
+      .update({
+        status:     'paid',
+        paid_at:    new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', invoice_id)
+
+    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 })
+
+    // Log in invoice_payments if the table exists (best-effort, ignore errors)
+    try {
+      await supabase.from('invoice_payments').insert({
+        invoice_id,
+        tenant_id:    inv.tenant_id,
+        amount_cents: paidCents,
+        method:       'card_online',
+        processed_at: new Date().toISOString(),
+        notes:        transaction_id ? `Helcim txn ${transaction_id}` : null,
+      })
+    } catch { /* table may not exist yet */ }
+
+    return NextResponse.json({ ok: true })
+  }
+
+  // ── Order payment flow ────────────────────────────────────────────────────
   const {
     order_id,
     payment_token,
@@ -15,16 +67,11 @@ export async function POST(req: NextRequest) {
     card_last4,
     card_brand,
     save_card,
-  } = await req.json()
+  } = body
 
   if (!order_id || !payment_token || !transaction_id) {
     return NextResponse.json({ error: 'Missing params' }, { status: 400 })
   }
-
-  const supabase = createSupabaseServiceClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
 
   // Verify order + token
   const { data: order, error: oErr } = await supabase

@@ -16,6 +16,7 @@ export interface SendEmailOptions {
   subject: string
   html: string
   replyTo?: string
+  attachments?: { filename: string; content: Buffer }[]
 }
 
 export async function sendEmail(opts: SendEmailOptions): Promise<void> {
@@ -34,6 +35,10 @@ export async function sendEmail(opts: SendEmailOptions): Promise<void> {
     subject: opts.subject,
     html: opts.html,
     replyTo: opts.replyTo,
+    attachments: opts.attachments?.map((a) => ({
+      filename: a.filename,
+      content: a.content,
+    })),
   })
   if (error) console.error('[email] Send error:', error)
 }
@@ -220,25 +225,25 @@ export function receiptEmail(d: ReceiptData): { subject: string; html: string } 
   }
 }
 
-// ─── Invoice ─────────────────────────────────────────────────────────────────
+// ─── Order Invoice (single order, pay link) ──────────────────────────────────
 
-export interface InvoiceData {
-  storeName: string
-  storePhone?: string | null
+export interface OrderInvoiceData {
+  storeName:    string
+  storePhone?:  string | null
   customerName: string
-  orderNumber: string
-  lines: LineItem[]
-  subtotal: number
-  taxAmount: number
-  total: number
-  balance: number
-  paymentLink: string
+  orderNumber:  string
+  lines:        LineItem[]
+  subtotal:     number
+  taxAmount:    number
+  total:        number
+  balance:      number
+  paymentLink:  string
 }
 
-export function invoiceEmail(d: InvoiceData): { subject: string; html: string } {
+export function orderInvoiceEmail(d: OrderInvoiceData): { subject: string; html: string } {
   const body = `
     <p>Hi ${d.customerName},</p>
-    <p>Please find your invoice for order <strong>#${d.orderNumber}</strong> below.</p>
+    <p>Here is your invoice for order <strong>#${d.orderNumber}</strong>. The balance due is <strong>${fmt(d.balance)}</strong>.</p>
     ${itemsTable(d.lines)}
     <table class="table">
       <tbody>
@@ -247,12 +252,144 @@ export function invoiceEmail(d: InvoiceData): { subject: string; html: string } 
       </tbody>
     </table>
     <div style="text-align:center;margin:24px 0;">
-      <a href="${d.paymentLink}" class="btn">Pay Invoice — ${fmt(d.balance)}</a>
+      <a href="${d.paymentLink}" class="btn">Pay ${fmt(d.balance)} Online</a>
     </div>
     ${d.storePhone ? `<div class="divider"></div><p style="font-size:13px;color:#6b7280">Questions? Call us at ${d.storePhone}</p>` : ''}
   `
   return {
-    subject: `Invoice #${d.orderNumber} — ${fmt(d.balance)} due`,
+    subject: `Invoice — #${d.orderNumber} (${fmt(d.balance)} due)`,
+    html: emailLayout(d.storeName, body),
+  }
+}
+
+// ─── Invoice ─────────────────────────────────────────────────────────────────
+
+export interface InvoiceEmailData {
+  storeName:       string
+  storeAddress?:   string | null
+  storePhone?:     string | null
+  logoUrl?:        string | null
+  recipientName:   string
+  invoiceNumber:   string
+  invoiceDate:     string
+  dueDate?:        string | null
+  reference?:      string | null
+  taxName?:        string | null
+  taxId?:          string | null
+  orders: {
+    orderNumber: string
+    createdAt:   string
+    lines:       { name: string; quantity: number; lineTotal: number }[]
+    balance:     number
+  }[]
+  subtotal:        number
+  taxAmount:       number
+  total:           number
+  paymentPageUrl:  string
+  etransferEmail?: string | null
+  notes?:          string | null
+}
+
+export function invoiceEmail(d: InvoiceEmailData): { subject: string; html: string } {
+  const taxLabel = d.taxName || 'Tax'
+
+  const orderBlocks = d.orders.map((o) => {
+    const lineRows = o.lines.map((l) => `
+      <tr>
+        <td style="padding:4px 0;font-size:13px;color:#374151;">${l.name}</td>
+        <td style="padding:4px 0;font-size:13px;color:#9ca3af;text-align:right;width:40px;">×${l.quantity}</td>
+        <td style="padding:4px 0;font-size:13px;color:#374151;text-align:right;font-weight:600;width:70px;">${fmt(l.lineTotal)}</td>
+      </tr>`).join('')
+
+    return `
+    <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px;">
+      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+        <tr>
+          <td style="padding:8px 14px;font-weight:700;font-size:14px;color:#111827;">${o.orderNumber}</td>
+          <td style="padding:8px 14px;font-size:12px;color:#9ca3af;text-align:right;">${o.createdAt}</td>
+        </tr>
+      </table>
+      <div style="padding:6px 14px 10px;">
+        <table style="width:100%;border-collapse:collapse;">
+          <tbody>${lineRows}</tbody>
+        </table>
+        <table style="width:100%;border-collapse:collapse;border-top:1px solid #f3f4f6;margin-top:6px;">
+          <tr>
+            <td style="padding-top:6px;font-size:12px;color:#6b7280;font-weight:600;">Order Total</td>
+            <td style="padding-top:6px;font-size:13px;font-weight:700;color:#111827;text-align:right;">${fmt(o.balance)}</td>
+          </tr>
+        </table>
+      </div>
+    </div>`
+  }).join('')
+
+  const etransferSection = d.etransferEmail ? `
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:20px;margin:12px 0;">
+      <p style="margin:0 0 6px;font-weight:700;font-size:15px;color:#166534;">Pay by Interac e-Transfer</p>
+      <p style="margin:0 0 4px;font-size:14px;color:#15803d;">Send to: <strong>${d.etransferEmail}</strong></p>
+      <p style="margin:0;font-size:13px;color:#166534;">Reference / message: <strong>${d.invoiceNumber}</strong></p>
+    </div>` : ''
+
+  const body = `
+    ${d.logoUrl
+      ? `<div style="margin-bottom:16px;"><img src="${d.logoUrl}" alt="${d.storeName}" style="max-height:56px;width:auto;display:block;"/></div>`
+      : ''}
+    <p style="margin:0 0 2px;font-size:13px;color:#6b7280;">${d.storeAddress ?? ''}</p>
+    ${d.storePhone ? `<p style="margin:0 0 16px;font-size:13px;color:#6b7280;">${d.storePhone}</p>` : ''}
+
+    <div style="height:1px;background:#e5e7eb;margin:16px 0;"></div>
+
+    <table style="width:100%;margin-bottom:16px;">
+      <tr>
+        <td style="vertical-align:top;">
+          <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#9ca3af;margin:0 0 4px;">Bill To</p>
+          <p style="font-size:14px;font-weight:700;color:#111827;margin:0;">${d.recipientName}</p>
+        </td>
+        <td style="vertical-align:top;text-align:right;">
+          <table style="margin-left:auto;border-collapse:collapse;">
+            <tr><td style="font-size:11px;color:#9ca3af;font-weight:600;padding:2px 8px 2px 0;text-align:right;">Invoice #</td><td style="font-size:11px;font-weight:700;padding:2px 0;">${d.invoiceNumber}</td></tr>
+            ${d.reference ? `<tr><td style="font-size:11px;color:#9ca3af;font-weight:600;padding:2px 8px 2px 0;text-align:right;">Reference</td><td style="font-size:11px;font-weight:700;padding:2px 0;">${d.reference}</td></tr>` : ''}
+            <tr><td style="font-size:11px;color:#9ca3af;font-weight:600;padding:2px 8px 2px 0;text-align:right;">Date</td><td style="font-size:11px;font-weight:700;padding:2px 0;">${d.invoiceDate}</td></tr>
+            ${d.dueDate ? `<tr><td style="font-size:11px;color:#9ca3af;font-weight:600;padding:2px 8px 2px 0;text-align:right;">Due</td><td style="font-size:11px;font-weight:700;color:#dc2626;padding:2px 0;">${d.dueDate}</td></tr>` : ''}
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#9ca3af;margin:0 0 8px;">Orders Included</p>
+    ${orderBlocks}
+
+    <table style="width:100%;border-collapse:collapse;margin-top:16px;">
+      <tbody>
+        ${d.taxAmount > 0 ? `
+        <tr><td style="padding:4px 0;font-size:13px;color:#6b7280;">Subtotal</td><td style="padding:4px 0;font-size:13px;text-align:right;font-weight:600;">${fmt(d.subtotal)}</td></tr>
+        <tr><td style="padding:4px 0;font-size:13px;color:#6b7280;">${taxLabel}</td><td style="padding:4px 0;font-size:13px;text-align:right;font-weight:600;">${fmt(d.taxAmount)}</td></tr>` : ''}
+        <tr style="border-top:2px solid #111827;">
+          <td style="padding:10px 0 4px;font-size:15px;font-weight:700;">Total Due</td>
+          <td style="padding:10px 0 4px;font-size:15px;font-weight:700;text-align:right;">${fmt(d.total)}</td>
+        </tr>
+      </tbody>
+    </table>
+    ${d.taxId ? `<p style="font-size:11px;color:#9ca3af;text-align:right;margin:4px 0 0;">HST #: ${d.taxId}</p>` : ''}
+
+    <div style="height:1px;background:#e5e7eb;margin:24px 0 16px;"></div>
+    <p style="font-size:14px;font-weight:600;color:#374151;margin:0 0 12px;">Payment options</p>
+
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:20px;margin:0 0 12px;text-align:center;">
+      <p style="margin:0 0 4px;font-weight:700;font-size:15px;color:#1e40af;">Pay by Credit Card</p>
+      <p style="margin:0 0 16px;font-size:13px;color:#3b82f6;">Secure online payment — Visa, Mastercard, Amex accepted</p>
+      <a href="${d.paymentPageUrl}" style="background:#1d4ed8;color:#fff!important;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:600;font-size:15px;display:inline-block;">
+        Pay ${fmt(d.total)} by Card
+      </a>
+    </div>
+
+    ${etransferSection}
+
+    ${d.notes ? `<p style="font-size:13px;color:#6b7280;background:#f9fafb;padding:12px;border-radius:8px;margin-top:12px;">📝 ${d.notes}</p>` : ''}
+    ${d.storePhone ? `<p style="font-size:13px;color:#6b7280;margin-top:16px;">Questions? Call us at ${d.storePhone}</p>` : ''}
+  `
+  return {
+    subject: `Invoice ${d.invoiceNumber} — ${fmt(d.total)} due`,
     html: emailLayout(d.storeName, body),
   }
 }

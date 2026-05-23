@@ -12,7 +12,10 @@
   },
   "dependencies": {
     "@laundry/db": "*",
+    "@react-pdf/renderer": "^4.5.1",
     "@trpc/server": "^11.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "resend": "^6.12.3",
     "stripe": "^17.4.0",
     "superjson": "^2.2.6",

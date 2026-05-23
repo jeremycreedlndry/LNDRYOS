@@ -9,12 +9,15 @@ import type { Customer } from '@laundry/db'
 import toast from 'react-hot-toast'
 import { useDebounce } from '@/hooks/useDebounce'
 import { CustomerModal } from '@/components/customers/CustomerModal'
+import { CustomerProfilePanel } from '@/components/customers/CustomerProfilePanel'
 import { ScheduleModal } from '@/components/pickups/ScheduleModal'
 
 export default function CustomersPage() {
   const utils = trpc.useUtils()
   const [query, setQuery] = useState('')
-  const [modal, setModal] = useState<'add' | Customer | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [profileId, setProfileId] = useState<string | null>(null)
+  const [profileTab, setProfileTab] = useState<'orders' | 'edit'>('orders')
   const [scheduleCustomer, setScheduleCustomer] = useState<Customer | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const debouncedQuery = useDebounce(query, 300)
@@ -28,9 +31,9 @@ export default function CustomersPage() {
     onError: (e) => toast.error(e.message),
   })
 
-  const handleSaved = () => {
-    utils.customers.list.invalidate()
-    setModal(null)
+  const openProfile = (id: string, tab: 'orders' | 'edit' = 'orders') => {
+    setProfileTab(tab)
+    setProfileId(id)
   }
 
   return (
@@ -38,7 +41,7 @@ export default function CustomersPage() {
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
-        <Button onClick={() => setModal('add')} className="flex items-center gap-1.5">
+        <Button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5">
           <Plus className="h-4 w-4" /> Add Customer
         </Button>
       </div>
@@ -76,8 +79,8 @@ export default function CustomersPage() {
                 {initials || <User className="h-4 w-4" />}
               </div>
 
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900">{name}</p>
+              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openProfile(customer.id, 'orders')}>
+                <p className="text-sm font-medium text-gray-900 hover:text-brand-600 transition-colors">{name}</p>
                 <p className="text-xs text-gray-500">
                   {customer.phone}
                   {customer.email && ` · ${customer.email}`}
@@ -104,7 +107,7 @@ export default function CustomersPage() {
                 <Truck className="h-4 w-4" />
               </button>
               <button
-                onClick={() => setModal(customer as Customer)}
+                onClick={() => openProfile(customer.id, 'edit')}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <Pencil className="h-4 w-4" />
@@ -129,11 +132,15 @@ export default function CustomersPage() {
         })}
       </div>
 
-      {modal !== null && (
+      {profileId && (
+        <CustomerProfilePanel customerId={profileId} onClose={() => setProfileId(null)} initialTab={profileTab} />
+      )}
+
+      {showAdd && (
         <CustomerModal
-          customer={modal === 'add' ? null : modal}
-          onClose={() => setModal(null)}
-          onSaved={handleSaved}
+          customer={null}
+          onClose={() => setShowAdd(false)}
+          onSaved={() => { utils.customers.list.invalidate(); setShowAdd(false) }}
         />
       )}
 

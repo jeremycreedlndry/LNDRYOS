@@ -225,23 +225,25 @@ export const nayaxRouter = router({
 
       if (!txn) return null
 
-      // Match to equipment in our DB by nayax_device_id (MachineID) or name
+      // Match to equipment in our DB by nayax_device_id (MachineID) or name.
+      // Use filter (not find) so stacked dryers sharing a nayax_device_id both appear.
       const { data: allEquip } = await ctx.supabase
         .from('equipment')
         .select('id, name, type, nayax_device_id')
         .eq('tenant_id', ctx.tenantId)
 
-      const equipment = (allEquip ?? []).find(
+      const equipmentMatches = (allEquip ?? []).filter(
         (e) =>
           String(e.nayax_device_id) === String(txn!.machineId) ||
           (e.name ?? '').toLowerCase() === txn!.machineName.toLowerCase()
-      ) ?? null
+      )
 
       return {
         machine_name:  txn.machineName,
         authorized_at: txn.authorizedAt,
         amount:        txn.amount,
-        equipment: equipment ? { id: equipment.id, name: equipment.name, type: equipment.type } : null,
+        // Array of matches — stacked dryers will return 2 entries (top + bottom)
+        equipment: equipmentMatches.map((e) => ({ id: e.id, name: e.name, type: e.type })),
       }
     }),
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Plus, X, GripVertical } from 'lucide-react'
 import {
   DndContext,
@@ -19,7 +19,6 @@ import {
 } from '@dnd-kit/sortable'
 import { KeyboardSensor } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { trpc } from '@/lib/trpc'
 import type { TenantSettings, OrderPreferenceOptions } from '@laundry/db'
@@ -173,24 +172,51 @@ export function PreferencesTab() {
   }, [tenant, ready])
 
   const update = trpc.tenants.updateSettings.useMutation({
-    onSuccess: () => { utils.tenants.getCurrent.invalidate(); toast.success('Preferences saved') },
+    onSuccess: () => utils.tenants.getCurrent.invalidate(),
     onError: (e) => toast.error(e.message),
   })
+
+  const initialized = useRef(false)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
 
   const setCategory = (key: PrefKey, values: string[]) =>
     setOptions((o) => ({ ...o, [key]: values }))
 
-  const handleSave = () => {
-    update.mutate({ settings: { order_preference_options: options } })
-  }
+  // Auto-save with 600ms debounce — skip the very first population from server
+  useEffect(() => {
+    if (!initialized.current) { initialized.current = ready; return }
+    setSaveStatus('saving')
+    const timer = setTimeout(() => {
+      update.mutate(
+        { settings: { order_preference_options: options } },
+        { onSuccess: () => setSaveStatus('saved'), onError: () => setSaveStatus('idle') }
+      )
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [options]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset 'saved' indicator after 2s
+  useEffect(() => {
+    if (saveStatus !== 'saved') return
+    const t = setTimeout(() => setSaveStatus('idle'), 2000)
+    return () => clearTimeout(t)
+  }, [saveStatus])
 
   return (
     <div className="space-y-6 max-w-xl">
-      <div>
-        <h2 className="text-base font-semibold text-gray-900">Order Preferences</h2>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Drag to reorder. Changes apply to all customer profiles.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Order Preferences</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Drag to reorder. Changes apply to all customer profiles.
+          </p>
+        </div>
+        <span className={`text-xs font-medium transition-opacity duration-300 ${
+          saveStatus === 'saving' ? 'text-gray-400 opacity-100' :
+          saveStatus === 'saved'  ? 'text-green-600 opacity-100' : 'opacity-0'
+        }`}>
+          {saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}
+        </span>
       </div>
 
       {PREF_CATEGORIES.map(({ key, label }) => (
@@ -201,12 +227,6 @@ export function PreferencesTab() {
           onChange={(vals) => setCategory(key, vals)}
         />
       ))}
-
-      <div className="pt-2">
-        <Button onClick={handleSave} disabled={update.isPending} size="lg">
-          {update.isPending ? 'Saving…' : 'Save Preferences'}
-        </Button>
-      </div>
     </div>
   )
 }

@@ -12,6 +12,8 @@ import {
   Workflow,
   Truck,
   MessageSquare,
+  Search,
+  FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ClockWidget } from './ClockWidget'
@@ -23,6 +25,8 @@ const NAV = [
   { href: '/workflow',  label: 'Workflow',  icon: Workflow },
   { href: '/pickups',   label: 'Pickups',   icon: Truck },
   { href: '/customers', label: 'Customers', icon: Users },
+  { href: '/invoices',  label: 'Invoices',  icon: FileText },
+  { href: '/search',    label: 'Search',    icon: Search },
   { href: '/inbox',     label: 'Inbox',     icon: MessageSquare, badge: true },
   { href: '/reports',   label: 'Reports',   icon: BarChart2 },
   { href: '/settings',  label: 'Settings',  icon: Settings },

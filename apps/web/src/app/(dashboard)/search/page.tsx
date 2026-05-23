@@ -12,7 +12,7 @@ import type { OrderStatus } from '@laundry/db'
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
-  { value: 'pending',   label: 'Pending' },
+  { value: 'pending',   label: 'Detail' },
   { value: 'cleaning',  label: 'Cleaning' },
   { value: 'ready',     label: 'Ready' },
   { value: 'picked_up', label: 'Picked Up' },
@@ -38,6 +38,7 @@ const METHOD_LABEL: Record<string, string> = {
   saved_card:        'Saved Card',
   pay_on_collection: 'On Collection',
   check:             'Check',
+  direct_deposit:    'Direct Deposit',
   invoice:           'Invoice',
 }
 

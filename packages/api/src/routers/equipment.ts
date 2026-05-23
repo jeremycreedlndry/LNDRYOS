@@ -83,6 +83,8 @@ export const equipmentRouter = router({
         equipment_id: z.string().uuid(),
         duration_minutes: z.number().int().nullable().optional(),
         temperature: z.string().nullable().optional(),
+        // Preserve original assigned_at when re-saving; omit to default to now()
+        assigned_at: z.string().nullable().optional(),
       })),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -94,13 +96,16 @@ export const equipmentRouter = router({
 
       if (input.assignments.length === 0) return { success: true }
 
-      const rows = input.assignments.map(({ equipment_id, duration_minutes, temperature }) => ({
+      const now = new Date().toISOString()
+      const rows = input.assignments.map(({ equipment_id, duration_minutes, temperature, assigned_at }) => ({
         order_id: input.order_id,
         equipment_id,
         tenant_id: ctx.tenantId,
         assigned_by: ctx.userId,
         duration_minutes: duration_minutes ?? null,
         temperature: temperature ?? null,
+        // Use caller-supplied timestamp (existing assignment) or stamp now (new assignment)
+        assigned_at: assigned_at ?? now,
       }))
 
       const { error } = await ctx.supabase

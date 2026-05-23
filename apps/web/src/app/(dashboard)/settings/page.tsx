@@ -22,6 +22,7 @@ import { FoldingPackingTab } from './FoldingPackingTab'
 import { IntegrationsTab } from './IntegrationsTab'
 import { ZonesTab } from './ZonesTab'
 import { StaffTab } from './StaffTab'
+import { BusinessAccountsTab } from './BusinessAccountsTab'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,12 +35,24 @@ const GIFT_CARD_DEFAULTS = [
 
 // ─── Service item modal ───────────────────────────────────────────────────────
 
+const PREF_GROUP_LABELS: Record<string, string> = {
+  bleach:           'Bleach',
+  dryer_sheets:     'Dryer Sheets',
+  detergent_type:   'Detergent Type',
+  fabric_softener:  'Fabric Softener',
+  wash_temperature: 'Wash Temperature',
+}
+
+// Categories that support preference groups (not upcharges or gift cards)
+const PREF_ELIGIBLE: ItemCategory[] = ['wash_fold', 'dry_clean', 'press_only', 'alterations', 'other']
+
 interface ServiceFormData {
   id?: string
   name: string
   category: ItemCategory
   unit_price_dollars: string
   unit_label: string
+  preference_groups: string[]
 }
 
 interface ServiceModalProps {
@@ -52,9 +65,20 @@ interface ServiceModalProps {
 
 function ServiceModal({ initial, category, onClose, onSave, isSaving }: ServiceModalProps) {
   const [form, setForm] = useState<ServiceFormData>(
-    initial ?? { name: '', category, unit_price_dollars: '', unit_label: 'item' }
+    initial ?? { name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] }
   )
   const set = (k: keyof ServiceFormData, v: string) => setForm((f) => ({ ...f, [k]: v }))
+
+  const togglePrefGroup = (key: string) => {
+    setForm((f) => ({
+      ...f,
+      preference_groups: f.preference_groups.includes(key)
+        ? f.preference_groups.filter((g) => g !== key)
+        : [...f.preference_groups, key],
+    }))
+  }
+
+  const showPrefGroups = PREF_ELIGIBLE.includes(category)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -70,7 +94,7 @@ function ServiceModal({ initial, category, onClose, onSave, isSaving }: ServiceM
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
             <Input value={form.name} onChange={(e) => set('name', e.target.value)} required autoFocus
-              placeholder={category === 'wash_fold' ? 'e.g. Wash & Fold' : 'e.g. Laundry Detergent'} />
+              placeholder={category === 'wash_fold' ? 'e.g. Wash & Fold Standard' : 'e.g. Laundry Detergent'} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -88,6 +112,27 @@ function ServiceModal({ initial, category, onClose, onSave, isSaving }: ServiceM
               </datalist>
             </div>
           </div>
+
+          {showPrefGroups && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Order Preferences</label>
+              <p className="text-xs text-gray-400 mb-2">Staff will be prompted to select these before entering weights.</p>
+              <div className="space-y-1.5">
+                {Object.entries(PREF_GROUP_LABELS).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.preference_groups.includes(key)}
+                      onChange={() => togglePrefGroup(key)}
+                      className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <span className="text-sm text-gray-700">{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
             <Button type="submit" disabled={isSaving} className="flex-1">{isSaving ? 'Saving…' : 'Save'}</Button>
@@ -476,9 +521,9 @@ function ServiceSection({ category, label, description }: { category: ItemCatego
   const handleSave = (data: ServiceFormData) => {
     const unit_price = Math.round(parseFloat(data.unit_price_dollars) * 100)
     if (data.id) {
-      updateItem.mutate({ id: data.id, name: data.name, unit_price, unit_label: data.unit_label })
+      updateItem.mutate({ id: data.id, name: data.name, unit_price, unit_label: data.unit_label, preference_groups: data.preference_groups })
     } else {
-      createItem.mutate({ name: data.name, category, unit_price, unit_label: data.unit_label, sort_order: items.length })
+      createItem.mutate({ name: data.name, category, unit_price, unit_label: data.unit_label, sort_order: items.length, preference_groups: data.preference_groups })
     }
   }
 
@@ -489,7 +534,7 @@ function ServiceSection({ category, label, description }: { category: ItemCatego
           <h3 className="text-sm font-semibold text-gray-700">{label}</h3>
           <p className="text-xs text-gray-400">{description}</p>
         </div>
-        <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item' })}
+        <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] })}
           className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700">
           <Plus className="h-3.5 w-3.5" /> Add
         </button>
@@ -498,7 +543,7 @@ function ServiceSection({ category, label, description }: { category: ItemCatego
       {orderedItems.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-400">
           No {label.toLowerCase()} yet.{' '}
-          <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item' })} className="text-brand-600 hover:underline">Add one</button>
+          <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] })} className="text-brand-600 hover:underline">Add one</button>
         </div>
       ) : (
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -510,7 +555,7 @@ function ServiceSection({ category, label, description }: { category: ItemCatego
                   item={item}
                   deleteConfirm={deleteConfirm}
                   onToggle={() => updateItem.mutate({ id: item.id, is_active: !item.is_active })}
-                  onEdit={() => setModal({ id: item.id, name: item.name, category: item.category as ItemCategory, unit_price_dollars: (item.unit_price / 100).toFixed(2), unit_label: item.unit_label })}
+                  onEdit={() => setModal({ id: item.id, name: item.name, category: item.category as ItemCategory, unit_price_dollars: (item.unit_price / 100).toFixed(2), unit_label: item.unit_label, preference_groups: (item.preference_groups as string[] | null) ?? [] })}
                   onDeleteRequest={() => setDeleteConfirm(item.id)}
                   onDeleteConfirm={() => deleteItem.mutate({ id: item.id })}
                   onDeleteCancel={() => setDeleteConfirm(null)}
@@ -552,7 +597,7 @@ function ServicesTab() {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type Tab = 'services' | 'store' | 'preferences' | 'machines' | 'folding' | 'integrations' | 'delivery' | 'staff'
+type Tab = 'services' | 'store' | 'preferences' | 'machines' | 'folding' | 'integrations' | 'delivery' | 'staff' | 'businesses'
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('services')
@@ -560,21 +605,32 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-2xl px-6 py-8">
       <h1 className="text-xl font-bold text-gray-900 mb-6">Settings</h1>
       <div className="mb-6 flex gap-1 rounded-lg bg-gray-100 p-1 w-fit flex-wrap">
-        {([['services', 'Services'], ['store', 'Store'], ['preferences', 'Preferences'], ['machines', 'Machines'], ['folding', 'Folding/Packing'], ['delivery', 'Delivery'], ['integrations', 'Integrations'], ['staff', 'Staff']] as [Tab, string][]).map(([value, label]) => (
+        {([
+          ['services',    'Services'],
+          ['store',       'Store'],
+          ['preferences', 'Preferences'],
+          ['machines',    'Machines'],
+          ['folding',     'Folding/Packing'],
+          ['delivery',    'Delivery'],
+          ['integrations','Integrations'],
+          ['staff',       'Staff'],
+          ['businesses',  'Business Accounts'],
+        ] as [Tab, string][]).map(([value, label]) => (
           <button key={value} onClick={() => setTab(value)}
             className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${tab === value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
           </button>
         ))}
       </div>
-      {tab === 'services'    && <ServicesTab />}
-      {tab === 'store'       && <StoreTab />}
-      {tab === 'preferences' && <PreferencesTab />}
-      {tab === 'machines'    && <MachinesTab />}
-      {tab === 'folding'     && <FoldingPackingTab />}
-      {tab === 'delivery'    && <ZonesTab />}
+      {tab === 'services'     && <ServicesTab />}
+      {tab === 'store'        && <StoreTab />}
+      {tab === 'preferences'  && <PreferencesTab />}
+      {tab === 'machines'     && <MachinesTab />}
+      {tab === 'folding'      && <FoldingPackingTab />}
+      {tab === 'delivery'     && <ZonesTab />}
       {tab === 'integrations' && <IntegrationsTab />}
-      {tab === 'staff'       && <StaffTab />}
+      {tab === 'staff'        && <StaffTab />}
+      {tab === 'businesses'   && <BusinessAccountsTab />}
     </div>
   )
 }

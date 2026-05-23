@@ -12,6 +12,7 @@ import toast from 'react-hot-toast'
 import { OrderDetailModal } from './OrderDetailModal'
 import { OrderIssuesModal } from '@/components/orders/OrderIssuesModal'
 import { PaymentModal } from '@/components/pos/PaymentModal'
+import { CustomerProfilePanel } from '@/components/customers/CustomerProfilePanel'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,13 +57,13 @@ interface OrderRow {
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
-const STATUS_FILTERS: { label: string; value: OrderStatus | undefined }[] = [
-  { label: 'All',       value: undefined },
-  { label: 'Pending',   value: 'pending' },
-  { label: 'Cleaning',  value: 'cleaning' },
-  { label: 'Ready',     value: 'ready' },
-  { label: 'Picked Up', value: 'picked_up' },
-  { label: 'Cancelled', value: 'cancelled' },
+const ACTIVE_EXCLUDE: OrderStatus[] = ['cancelled', 'picked_up', 'delivered']
+
+const STATUS_FILTERS: { label: string; value: OrderStatus | undefined; exclude?: OrderStatus[] }[] = [
+  { label: 'Active Orders', value: undefined, exclude: ACTIVE_EXCLUDE },
+  { label: 'Detail',        value: 'pending' },
+  { label: 'Cleaning',      value: 'cleaning' },
+  { label: 'Ready',         value: 'ready' },
 ]
 
 const STATUS_BADGE: Partial<Record<string, 'default' | 'secondary' | 'warning' | 'success' | 'destructive'>> = {
@@ -359,6 +360,7 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
   const [pendingStatus, setPendingStatus] = useState<string | null>(null)
   const [readyConfirmEquipment, setReadyConfirmEquipment] = useState<string[] | null>(null)
   const [popoverPos, setPopoverPos] = useState<{ top: number; right: number } | null>(null)
+  const [showCustomerProfile, setShowCustomerProfile] = useState<'orders' | 'edit' | null>(null)
   const markCleanedRef = useRef<HTMLButtonElement>(null)
 
   const setAssignments = trpc.equipment.setAssignments.useMutation()
@@ -439,13 +441,24 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
             {formatDueDate(order.due_date)}
           </p>
           <Badge variant={STATUS_BADGE[order.status] ?? 'secondary'} className="mt-1 text-[10px]">
-            {order.status === 'in_progress' ? 'In Progress' : order.status.replace('_', ' ')}
+            {order.status === 'pending' ? 'Detail' : order.status === 'in_progress' ? 'In Progress' : order.status.replace('_', ' ')}
           </Badge>
         </div>
 
         {/* Customer */}
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-900 truncate">{customerLabel}</p>
+          <div className="flex items-center gap-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 truncate">{customerLabel}</p>
+            {order.customer?.id && (
+              <button
+                onClick={() => setShowCustomerProfile('edit')}
+                className="shrink-0 text-gray-300 hover:text-brand-500 transition-colors"
+                aria-label="Edit customer"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
+          </div>
           {order.customer?.phone && (
             <p className="text-xs text-gray-400 mt-0.5">{order.customer.phone}</p>
           )}
@@ -569,6 +582,14 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
         </div>
       )}
 
+      {showCustomerProfile && order.customer?.id && (
+        <CustomerProfilePanel
+          customerId={order.customer.id}
+          onClose={() => setShowCustomerProfile(null)}
+          initialTab={showCustomerProfile}
+        />
+      )}
+
       {/* Mark Cleaned confirm popover — fixed so it escapes overflow:hidden */}
       {readyConfirmEquipment && popoverPos && (
         <>
@@ -617,14 +638,16 @@ function ColHeaders() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function OrdersPage() {
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | undefined>(undefined)
+  const [activeFilter, setActiveFilter] = useState(STATUS_FILTERS[0])
   const [assigningOrder, setAssigningOrder] = useState<OrderRow | null>(null)
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null)
   const [issuesOrder, setIssuesOrder] = useState<OrderRow | null>(null)
   const [paymentOrder, setPaymentOrder] = useState<OrderRow | null>(null)
 
   const { data: orders = [], isLoading } = trpc.orders.list.useQuery(
-    statusFilter ? { status: statusFilter } : undefined
+    activeFilter.value
+      ? { status: activeFilter.value }
+      : { exclude_statuses: activeFilter.exclude }
   )
 
   const utils = trpc.useUtils()
@@ -651,11 +674,11 @@ export default function OrdersPage() {
 
       {/* Status filter tabs */}
       <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
-        {STATUS_FILTERS.map(({ label, value }) => (
-          <button key={label} onClick={() => setStatusFilter(value)}
+        {STATUS_FILTERS.map((f) => (
+          <button key={f.label} onClick={() => setActiveFilter(f)}
             className={cn('shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition-colors',
-              statusFilter === value ? 'bg-brand-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50')}>
-            {label}
+              activeFilter.label === f.label ? 'bg-brand-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50')}>
+            {f.label}
           </button>
         ))}
       </div>

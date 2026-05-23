@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Banknote, CreditCard, Star, Package, Receipt, CheckCircle, Wallet } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Banknote, CreditCard, Star, Package, Receipt, CheckCircle, Wallet, Keyboard, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatCurrency, cn } from '@/lib/utils'
@@ -9,21 +9,32 @@ import { trpc } from '@/lib/trpc'
 import type { Customer } from '@laundry/db'
 import toast from 'react-hot-toast'
 
-type Method = 'cash' | 'card_terminal' | 'saved_card' | 'pay_on_collection' | 'prepaid_card' | 'invoice'
+type Method = 'card_terminal' | 'keyed_card' | 'saved_card' | 'cash' | 'pay_on_collection' | 'invoice' | 'direct_deposit'
 type TipMode = '$' | '%'
-type Step = 'select' | 'cash_entry' | 'success'
+type Step = 'select' | 'cash_entry' | 'keyed_card' | 'terminal_waiting' | 'success'
 
-const METHODS: { id: Method; label: string; icon: React.ElementType; comingSoon?: boolean }[] = [
-  { id: 'card_terminal',     label: 'Card Terminal',     icon: CreditCard },
-  { id: 'pay_on_collection', label: 'Pay on Collection', icon: Package },
+const METHODS: { id: Method; label: string; icon: React.ElementType }[] = [
+  { id: 'card_terminal',     label: 'Terminal',          icon: CreditCard },
+  { id: 'keyed_card',        label: 'Keyed Entry',       icon: Keyboard },
   { id: 'saved_card',        label: 'Saved Card',        icon: Star },
-  { id: 'prepaid_card',      label: 'Prepaid Card',      icon: Wallet, comingSoon: true },
+  { id: 'pay_on_collection', label: 'Pay on Collection', icon: Package },
   { id: 'invoice',           label: 'Invoice',           icon: Receipt },
   { id: 'cash',              label: 'Cash',              icon: Banknote },
+  { id: 'direct_deposit',    label: 'Direct Deposit',    icon: Wallet },
 ]
 
 const TIP_PRESETS_DOLLARS = [100, 200, 300, 400, 500]
 const TIP_PRESETS_PERCENT = [10, 15, 18, 20, 25]
+
+// Format card number with spaces every 4 digits
+function formatCardNumber(v: string) {
+  return v.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim()
+}
+// Format expiry as MM/YY
+function formatExpiry(v: string) {
+  const d = v.replace(/\D/g, '').slice(0, 4)
+  return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d
+}
 
 interface Props {
   orderId: string
@@ -41,8 +52,28 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   const [tipPreset, setTipPreset] = useState<number | null>(null)
   const [tipCustom, setTipCustom] = useState('')
   const [showTipInput, setShowTipInput] = useState(false)
+
+  // Cash
   const [cashTendered, setCashTendered] = useState('')
   const [changeDue, setChangeDue] = useState(0)
+
+  // Keyed card
+  const [cardNumber, setCardNumber] = useState('')
+  const [cardExpiry, setCardExpiry] = useState('')
+  const [cardCVV, setCardCVV] = useState('')
+  const [cardName, setCardName] = useState('')
+  const [saveCard, setSaveCard] = useState(false)
+
+  // Terminal
+  const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null)
+  const [terminalPaymentId, setTerminalPaymentId] = useState<string | null>(null)
+  const [terminalTxnId, setTerminalTxnId] = useState<string | null>(null)
+  const [terminalStatus, setTerminalStatus] = useState<string>('Waiting for card…')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const { data: terminals = [] } = trpc.payments.listTerminals.useQuery(undefined, {
+    enabled: method === 'card_terminal' || step === 'select',
+  })
 
   const recordCash = trpc.payments.recordCashPayment.useMutation({
     onSuccess: (data) => { setChangeDue(data.change_due ?? 0); setStep('success') },
@@ -54,7 +85,67 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
     onError: (e) => toast.error(e.message),
   })
 
+  const chargeKeyed = trpc.payments.chargeKeyed.useMutation({
+    onSuccess: () => setStep('success'),
+    onError: (e) => toast.error(e.message),
+  })
+
+  const chargeTerminal = trpc.payments.chargeTerminal.useMutation({
+    onSuccess: (data) => {
+      setTerminalPaymentId(data.id as string)
+      setTerminalTxnId(data.helcim_transaction_id as string)
+      setStep('terminal_waiting')
+    },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const confirmTerminal = trpc.payments.confirmTerminalPayment.useMutation({
+    onSuccess: () => { stopPolling(); setStep('success') },
+    onError: (e) => { stopPolling(); toast.error(e.message) },
+  })
+
+  const chargeSaved = trpc.payments.chargeSavedCard.useMutation({
+    onSuccess: () => setStep('success'),
+    onError: (e) => toast.error(e.message),
+  })
+
+  const utils = trpc.useUtils()
+
+  // ── Terminal polling ──────────────────────────────────────────────────────
+
+  const stopPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }
+
+  useEffect(() => {
+    if (step !== 'terminal_waiting' || !terminalTxnId) return
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const txn = await utils.payments.pollTransaction.fetch({ transactionId: terminalTxnId })
+        const s = txn.status?.toUpperCase()
+        setTerminalStatus(s === 'APPROVED' ? 'Approved!' : s === 'DECLINED' ? 'Declined' : 'Waiting for card…')
+
+        if (s === 'APPROVED' || s === 'DECLINED') {
+          stopPolling()
+          if (s === 'APPROVED' && terminalPaymentId) {
+            confirmTerminal.mutate({
+              payment_id: terminalPaymentId,
+              helcim_transaction_id: terminalTxnId,
+              customer_id: customer?.id ?? null,
+            })
+          } else {
+            toast.error('Card declined')
+          }
+        }
+      } catch { /* network blip — keep polling */ }
+    }, 2000)
+
+    return stopPolling
+  }, [step, terminalTxnId]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Tip calculation ───────────────────────────────────────────────────────
+
   const resolvedTip = (() => {
     if (tipPreset === null && !tipCustom) return 0
     const val = tipPreset !== null ? tipPreset : parseFloat(tipCustom)
@@ -66,14 +157,53 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   const grandTotal = totalCents + resolvedTip
 
   const hasSavedCard = !!(customer?.saved_card_last4)
+  const hasTerminals = terminals.length > 0
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  const handleTipPreset = (val: number) => {
+    if (tipPreset === val) setTipPreset(null)
+    else { setTipPreset(val); setTipCustom(''); setShowTipInput(false) }
+  }
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+
   const handleSubmit = () => {
     if (method === 'cash') { setStep('cash_entry'); return }
-    recordManual.mutate({
-      order_id: orderId,
-      amount: grandTotal,
-      method: method as 'card_terminal' | 'saved_card' | 'pay_on_collection' | 'invoice',
+
+    if (method === 'keyed_card') { setStep('keyed_card'); return }
+
+    if (method === 'card_terminal') {
+      const tid = selectedTerminalId ?? terminals[0]?.terminalId?.toString()
+      if (!tid) { toast.error('No terminal selected'); return }
+      chargeTerminal.mutate({ order_id: orderId, amount: grandTotal, terminal_id: tid })
+      return
+    }
+
+    if (method === 'saved_card') {
+      if (!customer?.id) { toast.error('No customer selected'); return }
+      chargeSaved.mutate({ order_id: orderId, amount: grandTotal, customer_id: customer.id })
+      return
+    }
+
+    // Manual methods: pay_on_collection, invoice, direct_deposit
+    recordManual.mutate({ order_id: orderId, amount: grandTotal, method: method as 'pay_on_collection' | 'invoice' | 'direct_deposit' })
+  }
+
+  const handleKeyedSubmit = () => {
+    const rawNumber = cardNumber.replace(/\s/g, '')
+    const rawExpiry = cardExpiry.replace('/', '')
+    if (rawNumber.length < 13) { toast.error('Enter a valid card number'); return }
+    if (rawExpiry.length !== 4) { toast.error('Enter expiry as MM/YY'); return }
+    if (cardCVV.length < 3) { toast.error('Enter CVV'); return }
+
+    chargeKeyed.mutate({
+      order_id:    orderId,
+      amount:      grandTotal,
+      card_number: rawNumber,
+      card_expiry: rawExpiry,
+      card_cvv:    cardCVV,
+      card_name:   cardName || undefined,
+      save_card:   saveCard,
+      customer_id: customer?.id ?? null,
     })
   }
 
@@ -83,12 +213,8 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
     recordCash.mutate({ order_id: orderId, amount: grandTotal, cash_tendered: tendered })
   }
 
-  const handleTipPreset = (val: number) => {
-    if (tipPreset === val) { setTipPreset(null) }
-    else { setTipPreset(val); setTipCustom(''); setShowTipInput(false) }
-  }
-
   // ── Success ───────────────────────────────────────────────────────────────
+
   if (step === 'success') {
     const isCollection = method === 'pay_on_collection'
     return (
@@ -97,9 +223,7 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
         <h2 className="text-xl font-bold text-gray-900">
           {isCollection ? 'Order Saved' : 'Payment Complete'}
         </h2>
-        {isCollection && (
-          <p className="text-sm text-gray-500 text-center">Payment due on collection.</p>
-        )}
+        {isCollection && <p className="text-sm text-gray-500 text-center">Payment due on collection.</p>}
         {method === 'cash' && changeDue > 0 && (
           <div className="w-full rounded-lg bg-yellow-50 border border-yellow-200 px-6 py-4 text-center">
             <p className="text-sm text-yellow-700">Change Due</p>
@@ -111,7 +235,36 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
     )
   }
 
+  // ── Terminal waiting ──────────────────────────────────────────────────────
+
+  if (step === 'terminal_waiting') {
+    const done = terminalStatus === 'Approved!' || terminalStatus === 'Declined'
+    return (
+      <div className="flex flex-col items-center gap-6 py-8">
+        {done
+          ? <CheckCircle className="h-14 w-14 text-green-500" />
+          : <Loader2 className="h-14 w-14 text-brand-600 animate-spin" />
+        }
+        <div className="text-center">
+          <p className="text-lg font-semibold text-gray-900">{terminalStatus}</p>
+          <p className="text-sm text-gray-500 mt-1">{formatCurrency(grandTotal)}</p>
+        </div>
+        {!done && (
+          <p className="text-xs text-gray-400 text-center">
+            Present card on the terminal.<br />Do not close this window.
+          </p>
+        )}
+        {!done && (
+          <Button variant="outline" onClick={() => { stopPolling(); setStep('select') }}>
+            Cancel
+          </Button>
+        )}
+      </div>
+    )
+  }
+
   // ── Cash entry ────────────────────────────────────────────────────────────
+
   if (step === 'cash_entry') {
     const tendered = parseFloat(cashTendered) * 100 || 0
     const change = tendered - grandTotal
@@ -159,17 +312,99 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
     )
   }
 
-  // ── Method selection ──────────────────────────────────────────────────────
-  const tipPresets = tipMode === '$' ? TIP_PRESETS_DOLLARS : TIP_PRESETS_PERCENT
-  const isSubmitting = recordManual.isPending
+  // ── Keyed card entry ──────────────────────────────────────────────────────
 
-  const submitDisabled = isSubmitting || (method === 'saved_card' && !hasSavedCard) || method === 'prepaid_card'
+  if (step === 'keyed_card') {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="text-center mb-1">
+          <p className="text-sm text-gray-500">Charge</p>
+          <p className="text-3xl font-bold text-gray-900">{formatCurrency(grandTotal)}</p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Card Number</label>
+          <Input
+            value={cardNumber}
+            onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
+            placeholder="0000 0000 0000 0000"
+            inputMode="numeric"
+            className="font-mono text-lg h-12 tracking-widest text-center"
+            autoFocus
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Expiry (MM/YY)</label>
+            <Input
+              value={cardExpiry}
+              onChange={(e) => setCardExpiry(formatExpiry(e.target.value))}
+              placeholder="MM/YY"
+              inputMode="numeric"
+              className="font-mono text-lg h-11 text-center"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">CVV</label>
+            <Input
+              value={cardCVV}
+              onChange={(e) => setCardCVV(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder="000"
+              inputMode="numeric"
+              type="password"
+              className="font-mono text-lg h-11 text-center"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Cardholder Name <span className="font-normal">(optional)</span></label>
+          <Input
+            value={cardName}
+            onChange={(e) => setCardName(e.target.value)}
+            placeholder="Name on card"
+            className="h-10"
+          />
+        </div>
+
+        {customer && (
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={saveCard} onChange={(e) => setSaveCard(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+            <span className="text-sm text-gray-700">
+              Save card to <span className="font-medium">{customer.first_name}</span>'s profile
+            </span>
+          </label>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          <Button variant="outline" onClick={() => setStep('select')} className="flex-1">Back</Button>
+          <Button onClick={handleKeyedSubmit} disabled={chargeKeyed.isPending} className="flex-1 bg-green-600 hover:bg-green-700 text-white">
+            {chargeKeyed.isPending ? 'Charging…' : `Charge ${formatCurrency(grandTotal)}`}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Method selection ──────────────────────────────────────────────────────
+
+  const tipPresets = tipMode === '$' ? TIP_PRESETS_DOLLARS : TIP_PRESETS_PERCENT
+  const isSubmitting = recordManual.isPending || chargeSaved.isPending || chargeTerminal.isPending
+
+  const methodDisabled = (id: Method) => {
+    if (id === 'saved_card' && !hasSavedCard) return true
+    if (id === 'card_terminal' && !hasTerminals) return true
+    return false
+  }
 
   const submitLabel = (() => {
     if (isSubmitting) return 'Processing…'
     if (method === 'cash') return 'Enter Cash'
+    if (method === 'keyed_card') return 'Enter Card'
+    if (method === 'card_terminal') return 'Send to Terminal'
     if (method === 'pay_on_collection') return 'Confirm — Pay Later'
-    if (method === 'card_terminal') return 'Charge Card'
     return 'Confirm'
   })()
 
@@ -181,14 +416,14 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
       </div>
 
       {/* Payment method tiles */}
-      <div className="grid grid-cols-3 gap-2">
-        {METHODS.filter(({ id }) => !excludeMethods?.includes(id)).map(({ id, label, icon: Icon, comingSoon }) => {
-          const disabled = (id === 'saved_card' && !hasSavedCard) || !!comingSoon
+      <div className="grid grid-cols-4 gap-2">
+        {METHODS.filter(({ id }) => !excludeMethods?.includes(id)).map(({ id, label, icon: Icon }) => {
+          const disabled = methodDisabled(id)
           return (
             <button key={id} onClick={() => !disabled && setMethod(id)}
               disabled={disabled}
               className={cn(
-                'flex flex-col items-center gap-2 rounded-xl border-2 py-4 px-2 transition-colors',
+                'flex flex-col items-center gap-1.5 rounded-xl border-2 py-3 px-1 transition-colors',
                 disabled
                   ? 'border-gray-100 bg-gray-50 opacity-40 cursor-not-allowed'
                   : method === id
@@ -196,17 +431,40 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
                     : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
               )}
             >
-              <Icon className={cn('h-6 w-6', method === id && !disabled ? 'text-brand-600' : 'text-gray-500')} />
-              <span className={cn('text-xs font-medium text-center leading-tight', method === id && !disabled ? 'text-brand-700' : 'text-gray-700')}>
+              <Icon className={cn('h-5 w-5', method === id && !disabled ? 'text-brand-600' : 'text-gray-500')} />
+              <span className={cn('text-[10px] font-medium text-center leading-tight', method === id && !disabled ? 'text-brand-700' : 'text-gray-700')}>
                 {label}
               </span>
-              {comingSoon && (
-                <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">Soon</span>
-              )}
             </button>
           )
         })}
       </div>
+
+      {/* Terminal selector */}
+      {method === 'card_terminal' && terminals.length > 1 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Terminal</label>
+          <div className="flex flex-wrap gap-2">
+            {terminals.map((t) => (
+              <button key={String(t.terminalId)}
+                onClick={() => setSelectedTerminalId(String(t.terminalId))}
+                className={cn('rounded-lg border-2 px-3 py-2 text-sm font-medium transition-colors',
+                  selectedTerminalId === String(t.terminalId) || (!selectedTerminalId && terminals[0]?.terminalId === t.terminalId)
+                    ? 'border-brand-500 bg-brand-50 text-brand-700'
+                    : 'border-gray-200 text-gray-700 hover:border-gray-300'
+                )}>
+                {t.terminalName}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {method === 'card_terminal' && terminals.length === 0 && (
+        <p className="text-xs text-amber-600 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-center">
+          No terminals found. Check your Helcim API token in Settings → Integrations.
+        </p>
+      )}
 
       {/* Saved card info */}
       {method === 'saved_card' && hasSavedCard && (
@@ -216,7 +474,7 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
             <p className="text-sm font-medium text-gray-900">
               {customer?.saved_card_brand ?? 'Card'} ···· {customer?.saved_card_last4}
             </p>
-            <p className="text-xs text-gray-500">Saved card on file</p>
+            <p className="text-xs text-gray-500">Will be charged immediately</p>
           </div>
         </div>
       )}
@@ -284,7 +542,7 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
       {/* Actions */}
       <div className="flex gap-2">
         <Button variant="outline" onClick={onCancel} className="flex-1">Cancel</Button>
-        <Button onClick={handleSubmit} disabled={submitDisabled} className="flex-1">
+        <Button onClick={handleSubmit} disabled={isSubmitting || methodDisabled(method)} className="flex-1">
           {submitLabel}
         </Button>
       </div>

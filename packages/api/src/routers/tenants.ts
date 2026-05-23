@@ -44,8 +44,10 @@ export const tenantsRouter = router({
         tax_rate: z.number().min(0).max(1).optional(),
         tax_name: z.string().optional(),
         tax_id: z.string().optional(),
+        logo_url: z.string().url().optional(),
         phone: z.string().optional(),
         website_url: z.string().optional(),
+        etransfer_email: z.string().email().optional(),
         offers_pickup_delivery: z.boolean().optional(),
         offers_wash_fold: z.boolean().optional(),
         hours: z.record(z.object({

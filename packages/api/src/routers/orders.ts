@@ -344,6 +344,48 @@ export const ordersRouter = router({
       }
     }),
 
+  // ─── Record payment against an order ─────────────────────────────────────────
+  recordPayment: tenantProcedure
+    .input(z.object({
+      order_id:     z.string().uuid(),
+      amount_cents: z.number().int().positive(),
+      method:       z.enum(['cash', 'card_present', 'card_online', 'e_transfer', 'cheque', 'account_credit', 'invoice', 'pay_on_collection']),
+      notes:        z.string().nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { data: order } = await ctx.supabase
+        .from('orders')
+        .select('id, total_amount, paid_amount, payment_status')
+        .eq('id', input.order_id)
+        .eq('tenant_id', ctx.tenantId)
+        .single()
+
+      if (!order) throw new TRPCError({ code: 'NOT_FOUND' })
+
+      const { error: payErr } = await ctx.supabase.from('payments').insert({
+        tenant_id:      ctx.tenantId,
+        order_id:       input.order_id,
+        amount:         input.amount_cents,
+        method:         input.method,
+        payment_status: 'completed',
+        processed_at:   new Date().toISOString(),
+        processed_by:   ctx.userId,
+        notes:          input.notes ?? null,
+      })
+      if (payErr) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: payErr.message })
+
+      const newPaid  = (order.paid_amount ?? 0) + input.amount_cents
+      const newStatus: string = newPaid >= order.total_amount ? 'paid' : 'partial'
+
+      await ctx.supabase.from('orders').update({
+        paid_amount:    newPaid,
+        payment_status: newStatus,
+        updated_at:     new Date().toISOString(),
+      }).eq('id', input.order_id).eq('tenant_id', ctx.tenantId)
+
+      return { success: true, status: newStatus }
+    }),
+
   // ─── Advanced search ──────────────────────────────────────────────────────────
   search: tenantProcedure
     .input(z.object({
@@ -430,6 +472,94 @@ export const ordersRouter = router({
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
       return data ?? []
     }),
+
+  // ── Get preference selections from customer's last order for a service ───
+  lastPrefsForService: tenantProcedure
+    .input(z.object({
+      customerId:    z.string().uuid(),
+      serviceItemId: z.string().uuid(),
+    }))
+    .query(async ({ ctx, input }) => {
+      // 1. Try the most recent order line notes for this customer + service
+      const { data: line } = await ctx.supabase
+        .from('order_lines')
+        .select('notes, orders!inner(customer_id, tenant_id, status)')
+        .eq('service_item_id', input.serviceItemId)
+        .eq('orders.customer_id', input.customerId)
+        .eq('orders.tenant_id', ctx.tenantId)
+        .neq('orders.status', 'cancelled')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (line?.notes) return { notesString: line.notes as string }
+
+      // 2. Fall back to the customer's saved order_preferences
+      const { data: customer } = await ctx.supabase
+        .from('customers')
+        .select('order_preferences')
+        .eq('id', input.customerId)
+        .eq('tenant_id', ctx.tenantId)
+        .maybeSingle()
+
+      const prefs = customer?.order_preferences as Record<string, string> | null
+      if (!prefs || Object.keys(prefs).length === 0) return null
+
+      // Convert {bleach: 'Yes', wash_temperature: 'Cold'} → "Yes · Cold" notes string
+      const notesString = Object.values(prefs).filter(Boolean).join(' · ')
+      return notesString ? { notesString } : null
+    }),
+
+  // ── Cancel (soft-delete) an order ────────────────────────────────────────
+  // Requires owner/manager role, or staff with permissions.delete_orders = true
+  cancel: tenantProcedure
+    .input(z.object({
+      id:     z.string().uuid(),
+      reason: z.string().min(1, 'Reason is required'),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Permission check — staff with delete_orders perm, manager, or owner
+      const { data: member } = await ctx.supabase
+        .from('tenant_members')
+        .select('role, permissions')
+        .eq('tenant_id', ctx.tenantId)
+        .eq('user_id', ctx.userId)
+        .maybeSingle()
+
+      const role  = member?.role as string | undefined
+      const perms = (member?.permissions ?? {}) as Record<string, unknown>
+      // If role can't be determined (e.g. DB issue), default to allowing within the tenant
+      const allowed = !role || role === 'owner' || role === 'manager' || perms.delete_orders === true
+
+      if (!allowed) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to delete orders' })
+      }
+
+      // Verify order belongs to this tenant and is not already cancelled
+      const { data: order } = await ctx.supabase
+        .from('orders')
+        .select('id, status, order_number')
+        .eq('id', input.id)
+        .eq('tenant_id', ctx.tenantId)
+        .maybeSingle()
+
+      if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' })
+      if (order.status === 'cancelled') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order is already cancelled' })
+
+      const { error } = await ctx.supabase
+        .from('orders')
+        .update({
+          status:               'cancelled',
+          cancelled_at:         new Date().toISOString(),
+          cancellation_reason:  input.reason,
+          cancelled_by:         ctx.userId,
+        })
+        .eq('id', input.id)
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+
+      return { id: order.id, order_number: order.order_number }
+    }),
 })
 
 // ─── Auto-charge helper (fire-and-forget) ────────────────────────────────────
@@ -510,11 +640,13 @@ async function getTenantInfo(supabase: any, tenantId: string) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function sendOrderCreatedEmail(supabase: any, tenantId: string, order: any, lines: { name: string; quantity: number; unit_label: string; unit_price: number }[]) {
-  const { data: customer } = await supabase.from('customers').select('first_name, last_name, email, phone, notification_preference').eq('id', order.customer_id).single()
+  const { data: customer } = await supabase.from('customers').select('first_name, last_name, email, phone, notification_preference, notification_topics').eq('id', order.customer_id).single()
   if (!customer) return
 
   const pref: string = customer.notification_preference ?? 'sms_email'
   if (pref === 'none') return
+  const topics = (customer.notification_topics ?? {}) as Record<string, boolean>
+  if (topics.order_confirmed === false) return
 
   const { storeName, storePhone } = await getTenantInfo(supabase, tenantId)
 
@@ -544,13 +676,15 @@ async function sendOrderCreatedEmail(supabase: any, tenantId: string, order: any
 async function sendOrderReadyEmail(supabase: any, tenantId: string, order: any) {
   const { data: fullOrder } = await supabase
     .from('orders')
-    .select('*, customer:customers(first_name, last_name, email, phone, notification_preference), lines:order_lines(name, quantity, unit_label, unit_price, line_total)')
+    .select('*, customer:customers(first_name, last_name, email, phone, notification_preference, notification_topics), lines:order_lines(name, quantity, unit_label, unit_price, line_total)')
     .eq('id', order.id)
     .single()
   if (!fullOrder?.customer) return
 
   const pref: string = fullOrder.customer.notification_preference ?? 'sms_email'
   if (pref === 'none') return
+  const topics = (fullOrder.customer.notification_topics ?? {}) as Record<string, boolean>
+  if (topics.order_ready === false) return
 
   const { storeName, storePhone } = await getTenantInfo(supabase, tenantId)
   const isPaid = fullOrder.payment_status === 'paid'

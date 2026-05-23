@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ToggleLeft, ToggleRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -119,12 +119,18 @@ export function StoreTab() {
   const { data: tenant } = trpc.tenants.getCurrent.useQuery()
   const [ready, setReady] = useState(false)
 
+  // Logo
+  const [logoUrl, setLogoUrl] = useState('')
+  const [logoUploading, setLogoUploading] = useState(false)
+  const logoInputRef = useRef<HTMLInputElement>(null)
+
   // Store info
   const [name, setName] = useState('')
   const [addressRaw, setAddressRaw] = useState('')
   const [address, setAddress] = useState<AddressFields>({ street: '', city: '', province: '', postal_code: '', country: '' })
   const [phone, setPhone] = useState('')
   const [websiteUrl, setWebsiteUrl] = useState('')
+  const [etransferEmail, setEtransferEmail] = useState('')
 
   // Hours
   const [hours, setHours] = useState<Record<string, { enabled: boolean; open: string; close: string }>>(DEFAULT_HOURS)
@@ -144,8 +150,10 @@ export function StoreTab() {
     const a = tenant.address as TenantAddress | null
 
     setName(tenant.name ?? '')
+    setLogoUrl(s?.logo_url ?? '')
     setPhone(s?.phone ?? '')
     setWebsiteUrl(s?.website_url ?? '')
+    setEtransferEmail(s?.etransfer_email ?? '')
     setTaxName(s?.tax_name ?? '')
     setTaxRate(s?.tax_rate != null ? (s.tax_rate * 100).toFixed(2) : '')
     setTaxId(s?.tax_id ?? '')
@@ -183,8 +191,10 @@ export function StoreTab() {
         formatted: addressRaw,
       },
       settings: {
+        ...(logoUrl ? { logo_url: logoUrl } : {}),
         phone,
         website_url: websiteUrl,
+        etransfer_email: etransferEmail.trim() || undefined,
         tax_name: taxName,
         tax_rate: isNaN(rate) ? 0 : rate / 100,
         tax_id: taxId,
@@ -199,12 +209,77 @@ export function StoreTab() {
     setAddress(fields)
   }, [])
 
+  const handleLogoChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLogoUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/upload/logo', { method: 'POST', body: fd })
+      if (!res.ok) {
+        const err = await res.json()
+        toast.error(err.error ?? 'Upload failed')
+        return
+      }
+      const { logo_url } = await res.json() as { logo_url: string }
+      setLogoUrl(logo_url)
+      update.mutate({ settings: { logo_url } })
+    } catch {
+      toast.error('Upload failed')
+    } finally {
+      setLogoUploading(false)
+      if (logoInputRef.current) logoInputRef.current.value = ''
+    }
+  }, [update])
+
   return (
     <form onSubmit={handleSubmit} className="space-y-10 max-w-xl">
 
       {/* A. Store Info */}
       <Section title="Store Information">
         <div className="grid grid-cols-1 gap-4">
+          {/* Logo upload */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Store Logo</label>
+            <div className="flex items-center gap-4">
+              {logoUrl && (
+                <img
+                  src={logoUrl}
+                  alt="Store logo"
+                  className="h-20 w-auto rounded-lg border border-gray-200 object-contain bg-gray-50 p-1"
+                />
+              )}
+              <div className="flex flex-col gap-1.5">
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleLogoChange}
+                />
+                <button
+                  type="button"
+                  disabled={logoUploading}
+                  onClick={() => logoInputRef.current?.click()}
+                  className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {logoUploading ? 'Uploading…' : logoUrl ? 'Replace logo' : 'Upload logo'}
+                </button>
+                {logoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => { setLogoUrl(''); update.mutate({ settings: { logo_url: undefined } }) }}
+                    className="text-xs text-red-500 hover:underline text-left"
+                  >
+                    Remove logo
+                  </button>
+                )}
+                <p className="text-xs text-gray-400">PNG, JPG, SVG — shown on invoices</p>
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Store name</label>
             <Input value={name} onChange={(e) => setName(e.target.value)} required />
@@ -253,6 +328,19 @@ export function StoreTab() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
               <Input type="url" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://example.com" />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">e-Transfer email</label>
+            <Input
+              type="email"
+              value={etransferEmail}
+              onChange={(e) => setEtransferEmail(e.target.value)}
+              placeholder="payments@yourstore.com"
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              Shown on invoices as the destination for Interac e-Transfer payments
+            </p>
           </div>
 
           <div>

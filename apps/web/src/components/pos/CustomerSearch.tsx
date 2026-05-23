@@ -1,12 +1,13 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Search, X } from 'lucide-react'
+import { Search, X, Pencil } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { trpc } from '@/lib/trpc'
 import type { Customer } from '@laundry/db'
 import { useDebounce } from '@/hooks/useDebounce'
 import { CustomerModal } from '@/components/customers/CustomerModal'
+import { CustomerProfilePanel } from '@/components/customers/CustomerProfilePanel'
 
 interface Props {
   selected: Customer | null
@@ -17,6 +18,7 @@ export function CustomerSearch({ selected, onSelect }: Props) {
   const [query, setQuery] = useState('')
   const [showResults, setShowResults] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
+  const [showProfile, setShowProfile] = useState<'orders' | 'edit' | null>(null)
   const debouncedQuery = useDebounce(query, 300)
 
   const { data: results, isLoading } = trpc.customers.search.useQuery(
@@ -39,17 +41,38 @@ export function CustomerSearch({ selected, onSelect }: Props) {
 
   if (selected) {
     return (
-      <div className="flex items-center justify-between rounded-lg border border-brand-200 bg-brand-50 px-4 py-3">
-        <div>
-          <p className="font-medium text-gray-900">
-            {selected.first_name} {selected.last_name}
-          </p>
-          <p className="text-sm text-gray-500">{selected.phone ?? selected.email ?? 'No contact'}</p>
+      <>
+        <div className="flex items-center justify-between rounded-lg border border-brand-200 bg-brand-50 px-4 py-3">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setShowProfile('orders')}
+                className="font-medium text-gray-900 hover:text-brand-600 transition-colors text-left"
+              >
+                {selected.first_name} {selected.last_name}
+              </button>
+              <button
+                onClick={() => setShowProfile('edit')}
+                className="text-gray-400 hover:text-brand-600 transition-colors"
+                aria-label="Edit customer"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500">{selected.phone ?? selected.email ?? 'No contact'}</p>
+          </div>
+          <button onClick={() => onSelect(null)} className="text-gray-400 hover:text-gray-600" aria-label="Remove customer">
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <button onClick={() => onSelect(null)} className="text-gray-400 hover:text-gray-600" aria-label="Remove customer">
-          <X className="h-4 w-4" />
-        </button>
-      </div>
+        {showProfile && (
+          <CustomerProfilePanel
+            customerId={selected.id}
+            onClose={() => setShowProfile(null)}
+            initialTab={showProfile}
+          />
+        )}
+      </>
     )
   }
 

@@ -4,7 +4,10 @@ import { sendEmail, pickupReminderEmail } from '@laundry/api/lib/email'
 import { sendSms, pickupReminderSms } from '@laundry/api/lib/sms'
 
 export async function GET(req: NextRequest) {
-  const secret = req.headers.get('x-cron-secret') ?? req.nextUrl.searchParams.get('secret')
+  // Accept x-cron-secret header, query param, or Vercel's Authorization: Bearer header
+  const secret = req.headers.get('x-cron-secret')
+    ?? req.nextUrl.searchParams.get('secret')
+    ?? req.headers.get('authorization')?.replace('Bearer ', '')
   if (secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -23,7 +26,7 @@ export async function GET(req: NextRequest) {
     .from('pickup_stops')
     .select(`
       id, scheduled_date, time_start, time_end, tenant_id,
-      customer:customers(id, first_name, last_name, email, phone, notification_preference),
+      customer:customers(id, first_name, last_name, email, phone, notification_preference, notification_topics),
       tenant:tenants(name, settings)
     `)
     .eq('scheduled_date', tomorrowStr)
@@ -39,9 +42,10 @@ export async function GET(req: NextRequest) {
   let skipped = 0
 
   for (const stop of stops ?? []) {
-    const customer = stop.customer as unknown as { id: string; first_name: string; last_name: string; email?: string | null; phone?: string | null; notification_preference?: string } | null
+    const customer = stop.customer as unknown as { id: string; first_name: string; last_name: string; email?: string | null; phone?: string | null; notification_preference?: string; notification_topics?: Record<string, boolean> } | null
     const pref = customer?.notification_preference ?? 'sms_email'
-    if (!customer || pref === 'none') { skipped++; continue }
+    const topics = customer?.notification_topics ?? {}
+    if (!customer || pref === 'none' || topics.pickup_reminder === false) { skipped++; continue }
 
     const tenant = stop.tenant as unknown as { name: string; settings?: Record<string, unknown> } | null
     const storeName = tenant?.name ?? 'Laundry'

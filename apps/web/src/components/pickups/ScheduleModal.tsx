@@ -20,6 +20,7 @@ type CustomerStub = {
   phone: string | null
   address_street: string | null
   address_city: string | null
+  driver_instructions?: string | null
 }
 
 interface Props {
@@ -34,6 +35,11 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
   const debouncedSearch = useDebounce(search, 250)
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerStub | null>(initialCustomer ?? null)
 
+  const selectCustomer = (c: CustomerStub) => {
+    setSelectedCustomer(c)
+    if (c.driver_instructions) set('notes', c.driver_instructions)
+  }
+
   const [form, setForm] = useState({
     frequency: 'weekly' as 'once' | 'weekly' | 'biweekly' | 'monthly',
     day_of_week: new Date().getDay(),
@@ -45,7 +51,7 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
     delivery_days_later: 2,
     end_date: '',
     auto_create_order: true,
-    notes: '',
+    notes: initialCustomer?.driver_instructions ?? '',
   })
   const set = (k: keyof typeof form, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -109,7 +115,7 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
                 {debouncedSearch.length >= 2 && (
                   <div className="absolute z-10 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg max-h-48 overflow-y-auto">
                     {(searchResults as CustomerStub[]).map((c) => (
-                      <button key={c.id} onClick={() => { setSelectedCustomer(c); setSearch('') }}
+                      <button key={c.id} onClick={() => { selectCustomer(c); setSearch('') }}
                         className="flex w-full flex-col px-4 py-2.5 text-left hover:bg-gray-50">
                         <span className="text-sm font-medium text-gray-900">{c.first_name} {c.last_name}</span>
                         <span className="text-xs text-gray-500">{c.phone}{c.address_street ? ` · ${c.address_street}` : ''}</span>
@@ -202,11 +208,11 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
             <span className="text-sm text-gray-700">Auto-create order when picked up</span>
           </label>
 
-          {/* Notes */}
+          {/* Driver Instructions */}
           <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Notes</label>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Driver Instructions</label>
             <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)}
-              rows={2} placeholder="Pickup instructions…"
+              rows={2} placeholder="e.g. Ring buzzer #2, side entrance…"
               className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm resize-none" />
           </div>
         </div>

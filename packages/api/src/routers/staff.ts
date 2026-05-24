@@ -113,7 +113,7 @@ export const staffRouter = router({
     const role  = (data?.role  as string | undefined) ?? 'staff'
     const perms = (data?.permissions ?? {}) as Record<string, unknown>
     const canDeleteOrders = role === 'owner' || role === 'manager' || perms.delete_orders === true
-    return { role, permissions: perms, canDeleteOrders }
+    return { role, permissions: perms, canDeleteOrders, userId: ctx.userId }
   }),
 
   myStatus: tenantProcedure.query(async ({ ctx }) => {

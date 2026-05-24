@@ -159,6 +159,157 @@ export const pickupStopsRouter = router({
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
       return data
     }),
+
+  // ── Driver: list today's + past-due stops for selected zones ─────────────
+  listForDriver: tenantProcedure
+    .input(z.object({
+      zone_ids: z.array(z.string().uuid()),  // empty = all zones
+      date: z.string(),                       // ISO date — today
+    }))
+    .query(async ({ ctx, input }) => {
+      const select = `
+        *,
+        customer:customers(id, first_name, last_name, phone, address_street, address_apt, address_city, address_postal_code, lat, lng, driver_instructions, order_preferences),
+        zone:delivery_zones(id, name, color),
+        order:orders(id, order_number, status, payment_status, total_amount, paid_amount)
+      `
+      // Today's stops
+      let todayQ = ctx.supabase
+        .from('pickup_stops')
+        .select(select)
+        .eq('tenant_id', ctx.tenantId)
+        .eq('scheduled_date', input.date)
+        .not('status', 'in', '("completed","skipped")')
+        .order('time_start', { nullsFirst: false })
+        .order('sequence_order')
+
+      if (input.zone_ids.length > 0) {
+        todayQ = todayQ.in('zone_id', input.zone_ids)
+      }
+
+      // Past-due stops (before today, not completed)
+      let pastQ = ctx.supabase
+        .from('pickup_stops')
+        .select(select)
+        .eq('tenant_id', ctx.tenantId)
+        .lt('scheduled_date', input.date)
+        .not('status', 'in', '("completed","skipped")')
+        .order('scheduled_date', { ascending: false })
+        .order('time_start', { nullsFirst: false })
+
+      if (input.zone_ids.length > 0) {
+        pastQ = pastQ.in('zone_id', input.zone_ids)
+      }
+
+      const [{ data: today }, { data: pastDue }] = await Promise.all([todayQ, pastQ])
+      return {
+        today: today ?? [],
+        pastDue: pastDue ?? [],
+      }
+    }),
+
+  // ── Driver: claim a stop ─────────────────────────────────────────────────
+  claimStop: tenantProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      // Only claim if unclaimed
+      const { data: stop } = await ctx.supabase
+        .from('pickup_stops')
+        .select('driver_user_id, status')
+        .eq('id', input.id)
+        .eq('tenant_id', ctx.tenantId)
+        .single()
+
+      if (!stop) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (stop.driver_user_id && stop.driver_user_id !== ctx.userId) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'Stop already claimed by another driver' })
+      }
+
+      const { data, error } = await ctx.supabase
+        .from('pickup_stops')
+        .update({
+          driver_user_id: ctx.userId,
+          claimed_at: new Date().toISOString(),
+          status: 'en_route',
+        })
+        .eq('id', input.id)
+        .eq('tenant_id', ctx.tenantId)
+        .select()
+        .single()
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return data
+    }),
+
+  // ── Driver: complete a stop with notes/bags/photo ────────────────────────
+  completeStop: tenantProcedure
+    .input(z.object({
+      id:           z.string().uuid(),
+      status:       z.enum(['completed', 'failed']),
+      driver_notes: z.string().nullable().optional(),
+      bag_count:    z.number().int().min(0).nullable().optional(),
+      photo_url:    z.string().nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...rest } = input
+      const { data, error } = await ctx.supabase
+        .from('pickup_stops')
+        .update({
+          ...rest,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('tenant_id', ctx.tenantId)
+        .eq('driver_user_id', ctx.userId)
+        .select(`*, customer:customers(id, first_name, last_name)`)
+        .single()
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+
+      // Mark linked order as delivered if it was a delivery stop
+      if (input.status === 'completed' && data.type === 'delivery' && data.order_id) {
+        await ctx.supabase
+          .from('orders')
+          .update({ status: 'delivered' })
+          .eq('id', data.order_id)
+          .eq('tenant_id', ctx.tenantId)
+      }
+
+      return data
+    }),
+
+  // ── Driver: get a single stop (for detail page) ──────────────────────────
+  getStop: tenantProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('pickup_stops')
+        .select(`
+          *,
+          customer:customers(id, first_name, last_name, phone, address_street, address_apt, address_city, address_postal_code, lat, lng, driver_instructions, order_preferences),
+          zone:delivery_zones(id, name, color),
+          order:orders(id, order_number, status, payment_status, total_amount, paid_amount)
+        `)
+        .eq('id', input.id)
+        .eq('tenant_id', ctx.tenantId)
+        .single()
+
+      if (error) throw new TRPCError({ code: 'NOT_FOUND' })
+      return data
+    }),
+
+  // ── Driver: get staff name for claimed stop ──────────────────────────────
+  getDriverName: tenantProcedure
+    .input(z.object({ user_id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { data } = await ctx.supabase
+        .from('tenant_members')
+        .select('name, email')
+        .eq('user_id', input.user_id)
+        .eq('tenant_id', ctx.tenantId)
+        .maybeSingle()
+      return data
+    }),
 })
 
 // ─── En-route notification (fire-and-forget) ──────────────────────────────────

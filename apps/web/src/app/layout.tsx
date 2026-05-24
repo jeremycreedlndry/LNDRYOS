@@ -6,6 +6,12 @@ import { Providers } from './providers'
 export const metadata: Metadata = {
   title: 'LNDRYOS — Laundry Management',
   description: 'Point of sale and management for laundry and dry cleaning businesses',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'LNDRYOS Driver',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

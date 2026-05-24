@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Banknote, CreditCard, Star, Package, Receipt, CheckCircle, Wallet, Keyboard, Loader2 } from 'lucide-react'
+import { Banknote, CreditCard, Star, Package, Receipt, CheckCircle, Wallet, Keyboard, Loader2, Gift } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatCurrency, cn } from '@/lib/utils'
@@ -9,14 +9,15 @@ import { trpc } from '@/lib/trpc'
 import type { Customer } from '@laundry/db'
 import toast from 'react-hot-toast'
 
-type Method = 'card_terminal' | 'keyed_card' | 'saved_card' | 'cash' | 'pay_on_collection' | 'invoice' | 'direct_deposit'
+type Method = 'card_terminal' | 'keyed_card' | 'saved_card' | 'prepaid_card' | 'cash' | 'pay_on_collection' | 'invoice' | 'direct_deposit'
 type TipMode = '$' | '%'
-type Step = 'select' | 'cash_entry' | 'keyed_card' | 'terminal_waiting' | 'success'
+type Step = 'select' | 'cash_entry' | 'keyed_card' | 'terminal_waiting' | 'prepaid_card' | 'success'
 
 const METHODS: { id: Method; label: string; icon: React.ElementType }[] = [
   { id: 'card_terminal',     label: 'Terminal',          icon: CreditCard },
   { id: 'keyed_card',        label: 'Keyed Entry',       icon: Keyboard },
   { id: 'saved_card',        label: 'Saved Card',        icon: Star },
+  { id: 'prepaid_card',      label: 'Prepaid Card',      icon: Gift },
   { id: 'pay_on_collection', label: 'Pay on Collection', icon: Package },
   { id: 'invoice',           label: 'Invoice',           icon: Receipt },
   { id: 'cash',              label: 'Cash',              icon: Banknote },
@@ -64,6 +65,16 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   const [cardName, setCardName] = useState('')
   const [saveCard, setSaveCard] = useState(false)
 
+  // Prepaid card
+  const [prepaidCardNumber, setPrepaidCardNumber] = useState('')
+  const [prepaidCardData, setPrepaidCardData] = useState<{
+    id: string
+    card_display_number: string
+    balance_cents: number
+    customer: { first_name: string; last_name: string } | null
+  } | null>(null)
+  const [prepaidLookupError, setPrepaidLookupError] = useState('')
+
   // Terminal
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null)
   const [terminalPaymentId, setTerminalPaymentId] = useState<string | null>(null)
@@ -108,6 +119,16 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
     onSuccess: () => setStep('success'),
     onError: (e) => toast.error(e.message),
   })
+
+  const chargePrepaid = trpc.payments.chargePrepaidCard.useMutation({
+    onSuccess: () => setStep('success'),
+    onError: (e) => toast.error(e.message),
+  })
+
+  const lookupPrepaid = trpc.prepaidCards.lookup.useQuery(
+    { display_number: prepaidCardNumber.replace(/\s/g, '') },
+    { enabled: false, retry: false }
+  )
 
   const utils = trpc.useUtils()
 
@@ -184,6 +205,14 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
       return
     }
 
+    if (method === 'prepaid_card') {
+      setPrepaidCardNumber('')
+      setPrepaidCardData(null)
+      setPrepaidLookupError('')
+      setStep('prepaid_card')
+      return
+    }
+
     // Manual methods: pay_on_collection, invoice, direct_deposit
     recordManual.mutate({ order_id: orderId, amount: grandTotal, method: method as 'pay_on_collection' | 'invoice' | 'direct_deposit' })
   }
@@ -205,6 +234,28 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
       save_card:   saveCard,
       customer_id: customer?.id ?? null,
     })
+  }
+
+  const handlePrepaidLookup = async () => {
+    const num = prepaidCardNumber.replace(/\s/g, '')
+    if (!num) return
+    try {
+      const result = await utils.prepaidCards.lookup.fetch({ display_number: num })
+      if (result.source === 'db' && result.card) {
+        if (result.card.status !== 'active') {
+          setPrepaidLookupError('This card is not active')
+          return
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setPrepaidCardData(result.card as any)
+      } else if (result.source === 'nayax') {
+        setPrepaidLookupError('Card found in Nayax but not registered in your system. Please import it first.')
+      } else {
+        setPrepaidLookupError('Card not found')
+      }
+    } catch {
+      setPrepaidLookupError('Lookup failed — check the card number and try again')
+    }
   }
 
   const handleCashPayment = () => {
@@ -308,6 +359,96 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
             Confirm
           </Button>
         </div>
+      </div>
+    )
+  }
+
+  // ── Prepaid card ──────────────────────────────────────────────────────────
+
+  if (step === 'prepaid_card') {
+    const sufficient = prepaidCardData && prepaidCardData.balance_cents >= grandTotal
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="text-center mb-1">
+          <p className="text-sm text-gray-500">Charge</p>
+          <p className="text-3xl font-bold text-gray-900">{formatCurrency(grandTotal)}</p>
+        </div>
+
+        {!prepaidCardData ? (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Card Number</label>
+              <Input
+                value={prepaidCardNumber}
+                onChange={(e) => { setPrepaidCardNumber(e.target.value); setPrepaidLookupError('') }}
+                onKeyDown={(e) => e.key === 'Enter' && handlePrepaidLookup()}
+                placeholder="Enter card number"
+                className="font-mono text-lg h-12 tracking-widest text-center"
+                autoFocus
+              />
+            </div>
+            {prepaidLookupError && (
+              <p className="text-sm text-red-600 text-center">{prepaidLookupError}</p>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep('select')} className="flex-1">Back</Button>
+              <Button
+                onClick={handlePrepaidLookup}
+                disabled={!prepaidCardNumber.trim() || lookupPrepaid.isFetching}
+                className="flex-1"
+              >
+                {lookupPrepaid.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Look Up'}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">Card</span>
+                <span className="font-mono font-semibold text-gray-900">{prepaidCardData.card_display_number}</span>
+              </div>
+              {prepaidCardData.customer && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-500">Holder</span>
+                  <span className="text-sm font-medium text-gray-900">
+                    {prepaidCardData.customer.first_name} {prepaidCardData.customer.last_name}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">Balance</span>
+                <span className={cn(
+                  'text-lg font-bold',
+                  sufficient ? 'text-green-700' : 'text-red-600'
+                )}>
+                  {formatCurrency(prepaidCardData.balance_cents)}
+                </span>
+              </div>
+              {sufficient && (
+                <div className="flex items-center justify-between text-xs text-gray-400">
+                  <span>Remaining after</span>
+                  <span>{formatCurrency(prepaidCardData.balance_cents - grandTotal)}</span>
+                </div>
+              )}
+            </div>
+            {!sufficient && (
+              <p className="text-sm text-red-600 text-center font-medium">
+                Insufficient balance — card has {formatCurrency(prepaidCardData.balance_cents)}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setPrepaidCardData(null)} className="flex-1">Different Card</Button>
+              <Button
+                onClick={() => chargePrepaid.mutate({ order_id: orderId, card_id: prepaidCardData.id, amount_cents: grandTotal })}
+                disabled={!sufficient || chargePrepaid.isPending}
+                className="flex-1"
+              >
+                {chargePrepaid.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Charge Card'}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     )
   }

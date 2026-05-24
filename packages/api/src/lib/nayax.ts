@@ -224,3 +224,37 @@ export async function addCreditToCard(
   const raw = data?.value ?? data?.Value ?? data?.credit ?? data?.Credit ?? 0
   return Number(raw)
 }
+
+// ─── Deduct funds (mirror deduction — our DB is source of truth) ──────────────
+
+/**
+ * Subtract credit from a card (mirrors our DB deduction to Nayax).
+ * Called fire-and-forget after we've already deducted from our DB.
+ * @returns The new balance in dollars, or null if the Nayax call fails.
+ */
+export async function deductCreditFromCard(
+  cardUniqueIdentifier: string,
+  amountDollars: number,
+  remarks = 'Payment via LNDRY Co'
+): Promise<number | null> {
+  try {
+    const params = new URLSearchParams({
+      CardCredit: amountDollars.toString(),
+      CreditChangeRemarks: encodeURIComponent(remarks),
+    })
+    const { ok, status, text } = await nayaxFetch(
+      `/v1/cards/${encodeURIComponent(cardUniqueIdentifier)}/credit/subtract?${params}`,
+      { method: 'POST' }
+    )
+    if (!ok) {
+      console.error(`[Nayax] deductCredit failed (${status}): ${text.slice(0, 200)}`)
+      return null
+    }
+    const data = JSON.parse(text)
+    const raw = data?.value ?? data?.Value ?? data?.credit ?? data?.Credit ?? 0
+    return Number(raw)
+  } catch (err) {
+    console.error('[Nayax] deductCredit error:', err)
+    return null
+  }
+}

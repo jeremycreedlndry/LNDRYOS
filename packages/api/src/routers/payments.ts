@@ -8,6 +8,7 @@ import {
   chargeCardToken,
   getTransaction,
 } from '../lib/helcim'
+import { chargeCardInternal } from './prepaidCards'
 
 // ─── Shared helper: record a payment row ────────────────────────────────────
 
@@ -323,5 +324,36 @@ export const paymentsRouter = router({
         status,
         processedBy: ctx.userId,
       })
+    }),
+
+  // ── Prepaid (gift) card payment ───────────────────────────────────────────
+  // Deducts from our DB (source of truth), mirrors to Nayax fire-and-forget,
+  // then records a payment row so the order's paid_amount trigger fires.
+  chargePrepaidCard: tenantProcedure
+    .input(z.object({
+      order_id:     z.string().uuid(),
+      card_id:      z.string().uuid(),   // customer_gift_cards.id
+      amount_cents: z.number().int().positive(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // 1. Deduct balance from our DB + sync to Nayax
+      const { balance_cents: remaining } = await chargeCardInternal(
+        ctx.supabase,
+        ctx.tenantId,
+        ctx.userId,
+        { card_id: input.card_id, amount_cents: input.amount_cents, order_id: input.order_id }
+      )
+
+      // 2. Record payment row (triggers order paid_amount update)
+      const payment = await recordPayment(ctx.supabase, {
+        tenantId:    ctx.tenantId,
+        orderId:     input.order_id,
+        amount:      input.amount_cents,
+        method:      'gift_card',
+        status:      'paid',
+        processedBy: ctx.userId,
+      })
+
+      return { ...payment, remaining_balance_cents: remaining }
     }),
 })

@@ -17,6 +17,7 @@ import { orderNotesRouter } from './routers/orderNotes'
 import { messagesRouter } from './routers/messages'
 import { businessAccountsRouter } from './routers/businessAccounts'
 import { invoicesRouter } from './routers/invoices'
+import { prepaidCardsRouter } from './routers/prepaidCards'
 
 export const appRouter = router({
   customers: customersRouter,
@@ -37,6 +38,7 @@ export const appRouter = router({
   messages: messagesRouter,
   businessAccounts: businessAccountsRouter,
   invoices: invoicesRouter,
+  prepaidCards: prepaidCardsRouter,
 })
 
 export type AppRouter = typeof appRouter

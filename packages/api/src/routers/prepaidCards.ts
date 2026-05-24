@@ -11,37 +11,38 @@ import {
 export const prepaidCardsRouter = router({
 
   // ── Look up card for POS checkout ────────────────────────────────────────
-  // Accepts either the NFC UID (from a tap) or the display number (typed in).
-  // NFC UID is the raw ID broadcast by the card chip — not shown to customers.
-  // Display number is what's printed on the card face.
+  // card_unique_identifier = the ID the NFC chip broadcasts (e.g. "1162872302")
+  //   → also used for Nayax Lynx API calls, NOT shown to customers
+  // display_number = what's printed on the card face (e.g. "1000000083")
+  //   → typed manually when no tap reader is present
   lookup: tenantProcedure
     .input(z.object({
-      nfc_uid:        z.string().optional(),  // from NFC tap — preferred
-      display_number: z.string().optional(),  // typed manually
+      card_unique_identifier: z.string().optional(),  // from NFC tap — preferred
+      display_number:         z.string().optional(),  // typed manually
     }))
     .query(async ({ ctx, input }) => {
-      if (!input.nfc_uid && !input.display_number) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Provide nfc_uid or display_number' })
+      if (!input.card_unique_identifier && !input.display_number) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Provide card_unique_identifier or display_number' })
       }
 
       const SELECT = `
-        id, card_display_number, nfc_uid, card_unique_identifier, card_id,
+        id, card_display_number, card_unique_identifier, card_id,
         balance_cents, status, notes,
         customer:customers(id, first_name, last_name)
       `
 
-      // 1. Try NFC UID first (exact, unambiguous)
-      if (input.nfc_uid) {
+      // 1. Try card_unique_identifier first (exact, from NFC tap)
+      if (input.card_unique_identifier) {
         const { data } = await ctx.supabase
           .from('customer_gift_cards')
           .select(SELECT)
           .eq('tenant_id', ctx.tenantId)
-          .eq('nfc_uid', input.nfc_uid)
+          .eq('card_unique_identifier', input.card_unique_identifier)
           .maybeSingle()
         if (data) return { source: 'db' as const, card: data }
       }
 
-      // 2. Try display number
+      // 2. Try display number (typed manually)
       if (input.display_number) {
         const num = input.display_number.replace(/\s/g, '')
         const { data } = await ctx.supabase
@@ -79,9 +80,8 @@ export const prepaidCardsRouter = router({
   // ── Import a Nayax card into our DB (optionally link to a customer) ──────
   import: tenantProcedure
     .input(z.object({
-      card_display_number:    z.string().min(1),
-      card_unique_identifier: z.string().min(1),
-      nfc_uid:                z.string().nullable().optional(),  // raw NFC chip ID
+      card_display_number:    z.string().min(1),  // printed on card face
+      card_unique_identifier: z.string().min(1),  // NFC tap ID + Lynx API identifier
       card_id:                z.number().int().nullable().optional(),
       balance_cents:          z.number().int().min(0).default(0),
       customer_id:            z.string().uuid().nullable().optional(),
@@ -94,7 +94,6 @@ export const prepaidCardsRouter = router({
           tenant_id:              ctx.tenantId,
           card_display_number:    input.card_display_number.replace(/\s/g, ''),
           card_unique_identifier: input.card_unique_identifier,
-          nfc_uid:                input.nfc_uid ?? null,
           card_id:                input.card_id ?? null,
           balance_cents:          input.balance_cents,
           customer_id:            input.customer_id ?? null,

@@ -129,6 +129,7 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
     { display_number: prepaidCardNumber.replace(/\s/g, '') || undefined },
     { enabled: false, retry: false }
   )
+  // Note: when a card is tapped on a reader, call lookup with card_unique_identifier instead
 
   const utils = trpc.useUtils()
 

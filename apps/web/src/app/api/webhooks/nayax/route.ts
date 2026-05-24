@@ -56,11 +56,12 @@ export async function POST(req: NextRequest) {
     .eq('nayax_card_id', cardId)
     .maybeSingle()
 
-  // Look up customer gift card by NFC UID (nfc_uid = raw CardId from tap)
+  // Look up customer gift card by card_unique_identifier (= NFC tap ID, e.g. "1162872302")
+  // This is the same value used for Nayax Lynx API calls — NOT the display number
   const { data: giftCard } = await service
     .from('customer_gift_cards')
     .select('id, tenant_id, customer_id, balance_cents, status')
-    .eq('nfc_uid', cardId)
+    .eq('card_unique_identifier', cardId)
     .maybeSingle()
 
   // We need at least one side to resolve the tenant

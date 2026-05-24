@@ -56,8 +56,15 @@ export async function POST(req: NextRequest) {
     .eq('nayax_card_id', cardId)
     .maybeSingle()
 
+  // Look up customer gift card by NFC UID (nfc_uid = raw CardId from tap)
+  const { data: giftCard } = await service
+    .from('customer_gift_cards')
+    .select('id, tenant_id, customer_id, balance_cents, status')
+    .eq('nfc_uid', cardId)
+    .maybeSingle()
+
   // We need at least one side to resolve the tenant
-  const tenantId = equipment?.tenant_id ?? member?.tenant_id
+  const tenantId = equipment?.tenant_id ?? member?.tenant_id ?? giftCard?.tenant_id
   if (!tenantId) {
     // Unknown device and card — log and acknowledge (don't error, Nayax will retry)
     console.warn('[nayax] Unrecognised device_id or card_id', { deviceId, cardId })
@@ -69,6 +76,7 @@ export async function POST(req: NextRequest) {
     tenant_id: tenantId,
     equipment_id: equipment?.id ?? null,
     employee_user_id: member?.user_id ?? null,
+    gift_card_id: giftCard?.id ?? null,
     nayax_device_id: deviceId,
     nayax_card_id: cardId,
     tapped_at: tappedAt,

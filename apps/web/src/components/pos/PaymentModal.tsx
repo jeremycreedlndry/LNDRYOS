@@ -126,7 +126,7 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   })
 
   const lookupPrepaid = trpc.prepaidCards.lookup.useQuery(
-    { display_number: prepaidCardNumber.replace(/\s/g, '') },
+    { display_number: prepaidCardNumber.replace(/\s/g, '') || undefined },
     { enabled: false, retry: false }
   )
 

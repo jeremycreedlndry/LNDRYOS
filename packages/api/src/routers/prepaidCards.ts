@@ -11,48 +11,69 @@ import {
 export const prepaidCardsRouter = router({
 
   // ── Look up card for POS checkout ────────────────────────────────────────
-  // Returns the card from our DB. If not found, tries Nayax and returns a
-  // preview so staff can import it. Does NOT create a record automatically.
+  // Accepts either the NFC UID (from a tap) or the display number (typed in).
+  // NFC UID is the raw ID broadcast by the card chip — not shown to customers.
+  // Display number is what's printed on the card face.
   lookup: tenantProcedure
-    .input(z.object({ display_number: z.string().min(1) }))
+    .input(z.object({
+      nfc_uid:        z.string().optional(),  // from NFC tap — preferred
+      display_number: z.string().optional(),  // typed manually
+    }))
     .query(async ({ ctx, input }) => {
-      const num = input.display_number.replace(/\s/g, '')
-
-      // Check our DB first
-      const { data: existing } = await ctx.supabase
-        .from('customer_gift_cards')
-        .select(`
-          id, card_display_number, card_unique_identifier, card_id,
-          balance_cents, status, notes,
-          customer:customers(id, first_name, last_name)
-        `)
-        .eq('tenant_id', ctx.tenantId)
-        .eq('card_display_number', num)
-        .maybeSingle()
-
-      if (existing) return { source: 'db' as const, card: existing }
-
-      // Not in our DB — try Nayax so staff can import
-      try {
-        const nayaxCard = await lookupCardByDisplayNumber(num)
-        let balance_dollars: number | null = null
-        try {
-          balance_dollars = await getCardBalance(nayaxCard.CardUniqueIdentifier)
-        } catch { /* balance unavailable */ }
-
-        return {
-          source: 'nayax' as const,
-          preview: {
-            card_display_number:    nayaxCard.CardDisplayNumber,
-            card_unique_identifier: nayaxCard.CardUniqueIdentifier,
-            card_id:                nayaxCard.CardID,
-            holder_name:            nayaxCard.CardHolderName,
-            balance_cents:          balance_dollars != null ? Math.round(balance_dollars * 100) : null,
-          },
-        }
-      } catch {
-        return { source: 'not_found' as const }
+      if (!input.nfc_uid && !input.display_number) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Provide nfc_uid or display_number' })
       }
+
+      const SELECT = `
+        id, card_display_number, nfc_uid, card_unique_identifier, card_id,
+        balance_cents, status, notes,
+        customer:customers(id, first_name, last_name)
+      `
+
+      // 1. Try NFC UID first (exact, unambiguous)
+      if (input.nfc_uid) {
+        const { data } = await ctx.supabase
+          .from('customer_gift_cards')
+          .select(SELECT)
+          .eq('tenant_id', ctx.tenantId)
+          .eq('nfc_uid', input.nfc_uid)
+          .maybeSingle()
+        if (data) return { source: 'db' as const, card: data }
+      }
+
+      // 2. Try display number
+      if (input.display_number) {
+        const num = input.display_number.replace(/\s/g, '')
+        const { data } = await ctx.supabase
+          .from('customer_gift_cards')
+          .select(SELECT)
+          .eq('tenant_id', ctx.tenantId)
+          .eq('card_display_number', num)
+          .maybeSingle()
+        if (data) return { source: 'db' as const, card: data }
+
+        // Not in our DB — try Nayax preview so staff can import
+        try {
+          const nayaxCard = await lookupCardByDisplayNumber(num)
+          let balance_dollars: number | null = null
+          try {
+            balance_dollars = await getCardBalance(nayaxCard.CardUniqueIdentifier)
+          } catch { /* balance unavailable */ }
+
+          return {
+            source: 'nayax' as const,
+            preview: {
+              card_display_number:    nayaxCard.CardDisplayNumber,
+              card_unique_identifier: nayaxCard.CardUniqueIdentifier,
+              card_id:                nayaxCard.CardID,
+              holder_name:            nayaxCard.CardHolderName,
+              balance_cents:          balance_dollars != null ? Math.round(balance_dollars * 100) : null,
+            },
+          }
+        } catch { /* fall through */ }
+      }
+
+      return { source: 'not_found' as const }
     }),
 
   // ── Import a Nayax card into our DB (optionally link to a customer) ──────
@@ -60,6 +81,7 @@ export const prepaidCardsRouter = router({
     .input(z.object({
       card_display_number:    z.string().min(1),
       card_unique_identifier: z.string().min(1),
+      nfc_uid:                z.string().nullable().optional(),  // raw NFC chip ID
       card_id:                z.number().int().nullable().optional(),
       balance_cents:          z.number().int().min(0).default(0),
       customer_id:            z.string().uuid().nullable().optional(),
@@ -72,6 +94,7 @@ export const prepaidCardsRouter = router({
           tenant_id:              ctx.tenantId,
           card_display_number:    input.card_display_number.replace(/\s/g, ''),
           card_unique_identifier: input.card_unique_identifier,
+          nfc_uid:                input.nfc_uid ?? null,
           card_id:                input.card_id ?? null,
           balance_cents:          input.balance_cents,
           customer_id:            input.customer_id ?? null,

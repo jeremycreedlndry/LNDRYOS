@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { X, CreditCard, DollarSign, Banknote, FileText, ChevronRight, Send, Plus, MessageSquare, Truck } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { X, CreditCard, DollarSign, Banknote, FileText, ChevronRight, Send, Plus, MessageSquare, Truck, Trash2, Monitor } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AddressAutocomplete } from '@/components/ui/AddressAutocomplete'
@@ -142,11 +142,259 @@ function PrefSelect({ label, value, onChange, options }: {
   )
 }
 
+// ─── Add Card Modal ───────────────────────────────────────────────────────────
+
+type AddCardStep =
+  | { type: 'choose' }
+  | { type: 'terminal_select' }
+  | { type: 'terminal_waiting'; invoiceNumber: string; terminalId: string }
+  | { type: 'helcim_loading' }
+  | { type: 'success'; card_last4: string | null | undefined; card_brand: string | null | undefined }
+  | { type: 'error'; message: string }
+
+function AddCardModal({ customerId, onClose, onSaved }: {
+  customerId: string
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const utils = trpc.useUtils()
+  const [step, setStep] = useState<AddCardStep>({ type: 'choose' })
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const { data: terminals = [] } = trpc.payments.listTerminals.useQuery()
+  const verifyViaTerminal  = trpc.payments.verifyCardViaTerminal.useMutation()
+  const initHelcimSession  = trpc.payments.initCardSaveSession.useMutation()
+  const saveCardToken      = trpc.payments.saveCardToken.useMutation()
+
+  // ── Poll for terminal verify result ───────────────────────────────────────
+  const startPolling = useCallback((invoiceNumber: string) => {
+    const poll = async () => {
+      try {
+        const result = await utils.payments.pollCardVerify.fetch({ invoiceNumber, customer_id: customerId })
+        if (result.status === 'APPROVED') {
+          utils.customers.getById.invalidate({ id: customerId })
+          setStep({ type: 'success', card_last4: result.card_last4, card_brand: result.card_brand })
+          return
+        }
+        if (result.status === 'DECLINED') {
+          setStep({ type: 'error', message: 'Card declined on terminal.' })
+          return
+        }
+        // Still pending — poll again
+        pollRef.current = setTimeout(poll, 1000)
+      } catch {
+        pollRef.current = setTimeout(poll, 1500)
+      }
+    }
+    pollRef.current = setTimeout(poll, 1000)
+  }, [customerId, utils])
+
+  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
+
+  // ── HelcimPay.js message listener ─────────────────────────────────────────
+  useEffect(() => {
+    if (step.type !== 'helcim_loading') return
+
+    const handler = async (event: MessageEvent) => {
+      if (typeof event.data !== 'object') return
+      const { eventType, eventStatus, data } = event.data as {
+        eventType?: string; eventStatus?: string
+        data?: { cardToken?: string; cardNumber?: string; cardType?: string }
+      }
+      if (eventType === 'HELCIM_PAY_JS_TRANSACTION_COMPLETE') {
+        if (eventStatus === 'SUCCESS' && data?.cardToken) {
+          await saveCardToken.mutateAsync({
+            customer_id: customerId,
+            card_token:  data.cardToken,
+            card_last4:  data.cardNumber?.slice(-4) ?? null,
+            card_brand:  data.cardType ?? null,
+          })
+          utils.customers.getById.invalidate({ id: customerId })
+          setStep({ type: 'success', card_last4: data.cardNumber?.slice(-4), card_brand: data.cardType })
+        } else {
+          setStep({ type: 'error', message: 'Card entry cancelled or declined.' })
+        }
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [step.type, customerId, saveCardToken, utils])
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  async function handleTerminalSelect(terminalId: string) {
+    try {
+      const { invoiceNumber } = await verifyViaTerminal.mutateAsync({ terminal_id: terminalId, customer_id: customerId })
+      setStep({ type: 'terminal_waiting', invoiceNumber, terminalId })
+      startPolling(invoiceNumber)
+    } catch (err) {
+      setStep({ type: 'error', message: (err as Error).message })
+    }
+  }
+
+  async function handleManualEntry() {
+    setStep({ type: 'helcim_loading' })
+    try {
+      const session = await initHelcimSession.mutateAsync({ customer_id: customerId })
+      // Load HelcimPay.js and launch the iframe
+      const existing = document.getElementById('helcim-pay-js')
+      if (!existing) {
+        const script = document.createElement('script')
+        script.id  = 'helcim-pay-js'
+        script.src = 'https://secure.myhelcim.com/js/version2.js'
+        script.onload = () => {
+          // @ts-expect-error — Helcim global
+          if (typeof appendHelcimIframe === 'function') appendHelcimIframe(session.checkoutToken)
+        }
+        document.body.appendChild(script)
+      } else {
+        // @ts-expect-error — Helcim global
+        if (typeof appendHelcimIframe === 'function') appendHelcimIframe(session.checkoutToken)
+      }
+    } catch (err) {
+      setStep({ type: 'error', message: (err as Error).message })
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 className="text-base font-bold text-gray-900">Add Card on File</h2>
+          <button onClick={onClose}><X className="h-5 w-5 text-gray-400" /></button>
+        </div>
+
+        <div className="px-6 py-5">
+
+          {/* Choose method */}
+          {step.type === 'choose' && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500">How would you like to add the card?</p>
+              <button
+                onClick={() => setStep({ type: 'terminal_select' })}
+                className="w-full flex items-center gap-4 rounded-xl border border-gray-200 px-4 py-4 text-left hover:bg-gray-50 transition-colors">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 shrink-0">
+                  <Monitor className="h-5 w-5 text-brand-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Terminal</p>
+                  <p className="text-xs text-gray-400">Customer taps or inserts card on the reader</p>
+                </div>
+              </button>
+              <button
+                onClick={handleManualEntry}
+                className="w-full flex items-center gap-4 rounded-xl border border-gray-200 px-4 py-4 text-left hover:bg-gray-50 transition-colors">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 shrink-0">
+                  <CreditCard className="h-5 w-5 text-brand-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Manual Entry</p>
+                  <p className="text-xs text-gray-400">Customer types card number on screen</p>
+                </div>
+              </button>
+            </div>
+          )}
+
+          {/* Select terminal */}
+          {step.type === 'terminal_select' && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500">Select a terminal:</p>
+              {terminals.length === 0 ? (
+                <p className="text-sm text-gray-400 italic">No terminals found.</p>
+              ) : (
+                terminals.map((t) => (
+                  <button key={t.terminalId} onClick={() => handleTerminalSelect(String(t.terminalId))}
+                    disabled={verifyViaTerminal.isPending}
+                    className="w-full flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-brand-50 transition-colors disabled:opacity-50">
+                    <Monitor className="h-4 w-4 text-brand-600 shrink-0" />
+                    <span className="text-sm font-medium text-gray-900">{t.terminalName}</span>
+                    {verifyViaTerminal.isPending && <span className="ml-auto text-xs text-gray-400">Sending…</span>}
+                  </button>
+                ))
+              )}
+              <button onClick={() => setStep({ type: 'choose' })}
+                className="w-full text-sm text-gray-400 hover:text-gray-600 py-1">← Back</button>
+            </div>
+          )}
+
+          {/* Waiting on terminal */}
+          {step.type === 'terminal_waiting' && (
+            <div className="flex flex-col items-center gap-4 py-4 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-50">
+                <CreditCard className="h-7 w-7 text-brand-600 animate-pulse" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Waiting for card…</p>
+                <p className="text-xs text-gray-400 mt-1">Ask the customer to tap or insert their card</p>
+              </div>
+              <button onClick={() => { if (pollRef.current) clearTimeout(pollRef.current); onClose() }}
+                className="text-xs text-gray-400 hover:text-gray-600 underline">Cancel</button>
+            </div>
+          )}
+
+          {/* HelcimPay.js loading */}
+          {step.type === 'helcim_loading' && (
+            <div className="flex flex-col items-center gap-4 py-4 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-50">
+                <CreditCard className="h-7 w-7 text-brand-600 animate-pulse" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Opening card entry…</p>
+                <p className="text-xs text-gray-400 mt-1">The customer can enter their card details</p>
+              </div>
+              <button onClick={onClose}
+                className="text-xs text-gray-400 hover:text-gray-600 underline">Cancel</button>
+            </div>
+          )}
+
+          {/* Success */}
+          {step.type === 'success' && (
+            <div className="flex flex-col items-center gap-4 py-4 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-50">
+                <CreditCard className="h-7 w-7 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Card saved!</p>
+                {step.card_last4 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    {step.card_brand ?? 'Card'} ···· {step.card_last4}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => { onSaved(); onClose() }}
+                className="w-full rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
+                Done
+              </button>
+            </div>
+          )}
+
+          {/* Error */}
+          {step.type === 'error' && (
+            <div className="flex flex-col items-center gap-4 py-4 text-center">
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 w-full">
+                {step.message}
+              </p>
+              <button onClick={() => setStep({ type: 'choose' })}
+                className="text-sm text-brand-600 hover:underline">Try again</button>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Tab: Edit ────────────────────────────────────────────────────────────────
 
 function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => void }) {
   const utils = trpc.useUtils()
-  const [form, setForm] = useState<CustomerFormData>(() => initForm(customer))
+  const [form, setForm]         = useState<CustomerFormData>(() => initForm(customer))
+  const [showAddCard, setShowAddCard] = useState(false)
   const set = (k: keyof CustomerFormData, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }))
 
   const { data: priceLists = [] } = trpc.priceLists.list.useQuery()
@@ -157,11 +405,18 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
     ...((tenant?.settings as TenantSettings)?.order_preference_options ?? {}),
   }
 
-  const update = trpc.customers.update.useMutation({
+  const update     = trpc.customers.update.useMutation({
     onSuccess: () => {
       toast.success('Customer saved')
       utils.customers.getById.invalidate({ id: customer.id })
       onSaved()
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const removeCard = trpc.payments.removeCard.useMutation({
+    onSuccess: () => {
+      toast.success('Card removed')
+      utils.customers.getById.invalidate({ id: customer.id })
     },
     onError: (e) => toast.error(e.message),
   })
@@ -382,24 +637,53 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
 
       {/* Saved Card */}
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Saved Card</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Saved Card</h3>
+          {!customer.saved_card_last4 && (
+            <button onClick={() => setShowAddCard(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">
+              <Plus className="h-3.5 w-3.5" /> Add Card
+            </button>
+          )}
+        </div>
         {customer.saved_card_last4 ? (
           <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
             <CreditCard className="h-5 w-5 text-gray-400 shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-medium text-gray-900">
-                {customer.saved_card_brand ?? 'Card'} ···· {customer.saved_card_last4}
+                {customer.saved_card_brand
+                  ? customer.saved_card_brand.charAt(0).toUpperCase() + customer.saved_card_brand.slice(1)
+                  : 'Card'} ···· {customer.saved_card_last4}
               </p>
-              <p className="text-xs text-gray-500">Added by customer via receipt link</p>
+              <p className="text-xs text-gray-500">Saved card on file</p>
             </div>
+            <button
+              onClick={() => setShowAddCard(true)}
+              className="text-xs text-brand-600 hover:underline shrink-0">
+              Replace
+            </button>
+            <button
+              onClick={() => removeCard.mutate({ customer_id: customer.id })}
+              disabled={removeCard.isPending}
+              className="ml-1 p-1 text-gray-400 hover:text-red-500 disabled:opacity-50 shrink-0">
+              <Trash2 className="h-4 w-4" />
+            </button>
           </div>
         ) : (
           <div className="flex items-center gap-3 rounded-xl border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-400">
             <CreditCard className="h-5 w-5 shrink-0" />
-            No saved card — customer can add one via their receipt link.
+            No saved card on file.
           </div>
         )}
       </div>
+
+      {showAddCard && (
+        <AddCardModal
+          customerId={customer.id}
+          onClose={() => setShowAddCard(false)}
+          onSaved={() => utils.customers.getById.invalidate({ id: customer.id })}
+        />
+      )}
 
       {/* Notes */}
       <div>

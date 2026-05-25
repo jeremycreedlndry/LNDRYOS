@@ -169,7 +169,25 @@ export async function getTransactionByInvoice(invoiceNumber: string): Promise<He
   return Array.isArray(res) && res.length > 0 ? res[0] : null
 }
 
-// ─── HelcimPay.js initialization (kept for reference) ────────────────────────
+// ─── Terminal card verification (zero-dollar, captures token) ────────────────
+
+export async function verifyWithTerminal(params: {
+  deviceCode:     string
+  idempotencyKey: string
+  invoiceNumber?: string
+}): Promise<void> {
+  // 202 empty body — same as purchaseWithTerminal
+  await helcimFetch(`/devices/${params.deviceCode}/payment/verify`, {
+    method: 'POST',
+    idempotencyKey: params.idempotencyKey,
+    body: JSON.stringify({
+      currency: 'CAD',
+      ...(params.invoiceNumber ? { invoiceNumber: params.invoiceNumber } : {}),
+    }),
+  })
+}
+
+// ─── HelcimPay.js initialization ─────────────────────────────────────────────
 
 export interface HelcimPaySession {
   checkoutToken: string
@@ -180,11 +198,12 @@ export async function initializeHelcimPay(params: {
   amountCents:   number
   currency?:     string
   customerCode?: string
+  paymentType?:  'purchase' | 'verify'
 }): Promise<HelcimPaySession> {
   return helcimFetch<HelcimPaySession>('/helcim-pay/initialize', {
     method: 'POST',
     body: JSON.stringify({
-      paymentType:  'purchase',
+      paymentType:  params.paymentType ?? 'purchase',
       amount:       +(params.amountCents / 100).toFixed(2),
       currency:     params.currency ?? 'CAD',
       ...(params.customerCode ? { customerCode: params.customerCode } : {}),

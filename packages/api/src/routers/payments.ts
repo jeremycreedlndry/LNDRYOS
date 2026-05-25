@@ -4,9 +4,11 @@ import { router, tenantProcedure } from '../trpc'
 import {
   listDevices,
   purchaseWithTerminal,
+  verifyWithTerminal,
   chargeCardToken,
   getTransaction,
   getTransactionByInvoice,
+  initializeHelcimPay,
 } from '../lib/helcim'
 import { chargeCardInternal } from './prepaidCards'
 
@@ -305,6 +307,100 @@ export const paymentsRouter = router({
         status,
         processedBy: ctx.userId,
       })
+    }),
+
+  // ── Card-on-file: verify via terminal (no charge, captures token) ────────
+  verifyCardViaTerminal: tenantProcedure
+    .input(z.object({
+      terminal_id: z.string(),
+      customer_id: z.string().uuid(),
+    }))
+    .mutation(async ({ input }) => {
+      // Use a random 32-char key as the invoiceNumber so we can poll later
+      const invoiceNumber = crypto.randomUUID().replace(/-/g, '')
+      try {
+        await verifyWithTerminal({
+          deviceCode:     input.terminal_id,
+          idempotencyKey: invoiceNumber,
+          invoiceNumber,
+        })
+      } catch (err) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: (err as Error).message })
+      }
+      return { invoiceNumber }
+    }),
+
+  // ── Card-on-file: poll verify result & save token ─────────────────────────
+  pollCardVerify: tenantProcedure
+    .input(z.object({
+      invoiceNumber: z.string(),
+      customer_id:   z.string().uuid(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const txn = await getTransactionByInvoice(input.invoiceNumber)
+      if (!txn) return { status: 'PENDING' as const }
+
+      const status = txn.status?.toUpperCase()
+      if (status === 'APPROVED' && txn.cardToken) {
+        await ctx.supabase
+          .from('customers')
+          .update({
+            helcim_card_token: txn.cardToken,
+            saved_card_last4:  txn.cardNumber?.slice(-4) ?? null,
+            saved_card_brand:  txn.cardType              ?? null,
+          })
+          .eq('id', input.customer_id)
+          .eq('tenant_id', ctx.tenantId)
+        return { status: 'APPROVED' as const, card_last4: txn.cardNumber?.slice(-4), card_brand: txn.cardType }
+      }
+      if (status === 'DECLINED') return { status: 'DECLINED' as const }
+      return { status: 'PENDING' as const }
+    }),
+
+  // ── Card-on-file: init HelcimPay.js verify session (manual entry) ─────────
+  initCardSaveSession: tenantProcedure
+    .input(z.object({ customer_id: z.string().uuid() }))
+    .mutation(async () => {
+      return initializeHelcimPay({ amountCents: 0, paymentType: 'verify' })
+    }),
+
+  // ── Card-on-file: save token returned by HelcimPay.js ────────────────────
+  saveCardToken: tenantProcedure
+    .input(z.object({
+      customer_id: z.string().uuid(),
+      card_token:  z.string(),
+      card_last4:  z.string().nullable().optional(),
+      card_brand:  z.string().nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { error } = await ctx.supabase
+        .from('customers')
+        .update({
+          helcim_card_token: input.card_token,
+          saved_card_last4:  input.card_last4  ?? null,
+          saved_card_brand:  input.card_brand  ?? null,
+        })
+        .eq('id', input.customer_id)
+        .eq('tenant_id', ctx.tenantId)
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return { ok: true }
+    }),
+
+  // ── Card-on-file: remove saved card ──────────────────────────────────────
+  removeCard: tenantProcedure
+    .input(z.object({ customer_id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { error } = await ctx.supabase
+        .from('customers')
+        .update({
+          helcim_card_token: null,
+          saved_card_last4:  null,
+          saved_card_brand:  null,
+        })
+        .eq('id', input.customer_id)
+        .eq('tenant_id', ctx.tenantId)
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return { ok: true }
     }),
 
   // ── Prepaid (gift) card payment ───────────────────────────────────────────

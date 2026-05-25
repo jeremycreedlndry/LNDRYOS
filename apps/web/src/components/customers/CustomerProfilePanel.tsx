@@ -640,7 +640,7 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Saved Card</h3>
           {!customer.saved_card_last4 && (
-            <button onClick={() => setShowAddCard(true)}
+            <button type="button" onClick={() => setShowAddCard(true)}
               className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">
               <Plus className="h-3.5 w-3.5" /> Add Card
             </button>
@@ -657,12 +657,12 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
               </p>
               <p className="text-xs text-gray-500">Saved card on file</p>
             </div>
-            <button
+            <button type="button"
               onClick={() => setShowAddCard(true)}
               className="text-xs text-brand-600 hover:underline shrink-0">
               Replace
             </button>
-            <button
+            <button type="button"
               onClick={() => removeCard.mutate({ customer_id: customer.id })}
               disabled={removeCard.isPending}
               className="ml-1 p-1 text-gray-400 hover:text-red-500 disabled:opacity-50 shrink-0">

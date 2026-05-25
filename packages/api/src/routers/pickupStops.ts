@@ -124,6 +124,11 @@ export const pickupStopsRouter = router({
           .eq('tenant_id', ctx.tenantId)
       }
 
+      // If completing a pickup, move (or create) the linked order to "Detail" (pending)
+      if (input.status === 'completed' && data.type === 'pickup') {
+        await ensurePickupOrderDetail(ctx.supabase, ctx.tenantId, data)
+      }
+
       // Notify customer when driver goes en route
       if (input.status === 'en_route' && data.customer_id) {
         sendEnRouteNotification(ctx.supabase, ctx.tenantId, data).catch(console.error)
@@ -275,6 +280,11 @@ export const pickupStopsRouter = router({
           .eq('tenant_id', ctx.tenantId)
       }
 
+      // If completing a pickup, move (or create) the linked order to "Detail" (pending)
+      if (input.status === 'completed' && data.type === 'pickup') {
+        await ensurePickupOrderDetail(ctx.supabase, ctx.tenantId, data)
+      }
+
       return data
     }),
 
@@ -311,6 +321,73 @@ export const pickupStopsRouter = router({
       return data
     }),
 })
+
+// ─── On pickup completion: ensure order exists and is set to "Detail" (pending) ──
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function ensurePickupOrderDetail(supabase: any, tenantId: string, stop: any) {
+  // If already has an order, just set it to pending ("Detail")
+  if (stop.order_id) {
+    await supabase
+      .from('orders')
+      .update({ status: 'pending' })
+      .eq('id', stop.order_id)
+      .eq('tenant_id', tenantId)
+      .in('status', ['pending']) // only update if still in pending (don't downgrade)
+    return
+  }
+
+  // No order yet — check if the schedule wants auto-creation
+  if (!stop.schedule_id) return
+  const { data: schedule } = await supabase
+    .from('pickup_schedules')
+    .select('auto_create_order, customer_id')
+    .eq('id', stop.schedule_id)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (!schedule?.auto_create_order) return
+
+  // Generate next order number
+  const { data: lastOrder } = await supabase
+    .from('orders')
+    .select('order_number')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  let nextNum = 1
+  if (lastOrder?.order_number) {
+    const match = lastOrder.order_number.match(/(\d+)$/)
+    if (match) nextNum = parseInt(match[1]) + 1
+  }
+  const orderNumber = `ORD-${String(nextNum).padStart(5, '0')}`
+
+  const { data: order } = await supabase
+    .from('orders')
+    .insert({
+      tenant_id: tenantId,
+      order_number: orderNumber,
+      customer_id: stop.customer_id ?? schedule.customer_id,
+      status: 'pending',
+      due_date: stop.scheduled_date ?? null,
+      subtotal: 0,
+      tax_amount: 0,
+      discount_amount: 0,
+      total_amount: 0,
+    })
+    .select('id')
+    .single()
+
+  if (order?.id) {
+    // Link the new order back to this stop
+    await supabase
+      .from('pickup_stops')
+      .update({ order_id: order.id })
+      .eq('id', stop.id)
+      .eq('tenant_id', tenantId)
+  }
+}
 
 // ─── En-route notification (fire-and-forget) ──────────────────────────────────
 

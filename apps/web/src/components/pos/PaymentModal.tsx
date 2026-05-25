@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Banknote, CreditCard, Star, Package, Receipt, CheckCircle, Wallet, Keyboard, Loader2, Gift } from 'lucide-react'
+import { Banknote, CreditCard, Star, Package, Receipt, CheckCircle, Wallet, Loader2, Gift } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatCurrency, cn } from '@/lib/utils'
@@ -9,33 +9,23 @@ import { trpc } from '@/lib/trpc'
 import type { Customer } from '@laundry/db'
 import toast from 'react-hot-toast'
 
-type Method = 'card_terminal' | 'keyed_card' | 'saved_card' | 'prepaid_card' | 'cash' | 'pay_on_collection' | 'invoice' | 'direct_deposit'
+type Method = 'card_terminal' | 'saved_card' | 'prepaid_card' | 'cash' | 'pay_on_collection' | 'invoice' | 'direct_deposit'
 type TipMode = '$' | '%'
-type Step = 'select' | 'cash_entry' | 'keyed_card' | 'terminal_waiting' | 'prepaid_card' | 'success'
+type Step = 'select' | 'cash_entry' | 'terminal_waiting' | 'prepaid_card' | 'success'
 
 const METHODS: { id: Method; label: string; icon: React.ElementType }[] = [
-  { id: 'card_terminal',     label: 'Terminal',          icon: CreditCard },
-  { id: 'keyed_card',        label: 'Keyed Entry',       icon: Keyboard },
-  { id: 'saved_card',        label: 'Saved Card',        icon: Star },
-  { id: 'prepaid_card',      label: 'Prepaid Card',      icon: Gift },
-  { id: 'pay_on_collection', label: 'Pay on Collection', icon: Package },
-  { id: 'invoice',           label: 'Invoice',           icon: Receipt },
-  { id: 'cash',              label: 'Cash',              icon: Banknote },
-  { id: 'direct_deposit',    label: 'Direct Deposit',    icon: Wallet },
+  { id: 'card_terminal',     label: 'Terminal',            icon: CreditCard },
+  { id: 'saved_card',        label: 'Saved Card',          icon: Star },
+  { id: 'pay_on_collection', label: 'Pay on Collection',   icon: Package },
+  { id: 'cash',              label: 'Cash',                icon: Banknote },
+  { id: 'direct_deposit',    label: 'E-Transfer',          icon: Wallet },
+  { id: 'invoice',           label: 'Invoice',             icon: Receipt },
+  { id: 'prepaid_card',      label: 'Prepaid Card',        icon: Gift },
 ]
 
 const TIP_PRESETS_DOLLARS = [100, 200, 300, 400, 500]
 const TIP_PRESETS_PERCENT = [10, 15, 18, 20, 25]
 
-// Format card number with spaces every 4 digits
-function formatCardNumber(v: string) {
-  return v.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim()
-}
-// Format expiry as MM/YY
-function formatExpiry(v: string) {
-  const d = v.replace(/\D/g, '').slice(0, 4)
-  return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d
-}
 
 interface Props {
   orderId: string
@@ -57,13 +47,6 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   // Cash
   const [cashTendered, setCashTendered] = useState('')
   const [changeDue, setChangeDue] = useState(0)
-
-  // Keyed card
-  const [cardNumber, setCardNumber] = useState('')
-  const [cardExpiry, setCardExpiry] = useState('')
-  const [cardCVV, setCardCVV] = useState('')
-  const [cardName, setCardName] = useState('')
-  const [saveCard, setSaveCard] = useState(false)
 
   // Prepaid card
   const [prepaidCardNumber, setPrepaidCardNumber] = useState('')
@@ -92,11 +75,6 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   })
 
   const recordManual = trpc.payments.recordManualPayment.useMutation({
-    onSuccess: () => setStep('success'),
-    onError: (e) => toast.error(e.message),
-  })
-
-  const chargeKeyed = trpc.payments.chargeKeyed.useMutation({
     onSuccess: () => setStep('success'),
     onError: (e) => toast.error(e.message),
   })
@@ -135,33 +113,63 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
 
   // ── Terminal polling ──────────────────────────────────────────────────────
 
+  const POLL_FAST_MS     = 750       // first 15s — catch quick taps fast
+  const POLL_SLOW_MS     = 2000      // after 15s — steady polling
+  const POLL_FAST_FOR_MS = 15_000    // how long to stay in fast mode
+  const POLL_TIMEOUT_MS  = 120_000   // 2 minutes — auto-cancel if no response
+
   const stopPolling = () => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null }
   }
 
   useEffect(() => {
     if (step !== 'terminal_waiting' || !terminalTxnId) return
 
-    pollRef.current = setInterval(async () => {
+    const startedAt = Date.now()
+
+    const tick = async () => {
+      const elapsed = Date.now() - startedAt
+
+      // Timeout — reader likely cancelled with no Helcim transaction created
+      if (elapsed > POLL_TIMEOUT_MS) {
+        stopPolling()
+        setTerminalStatus('Timed out')
+        toast.error('Terminal timed out — no response from reader')
+        setStep('select')
+        return
+      }
+
       try {
         const txn = await utils.payments.pollTransaction.fetch({ transactionId: terminalTxnId })
         const s = txn.status?.toUpperCase()
-        setTerminalStatus(s === 'APPROVED' ? 'Approved!' : s === 'DECLINED' ? 'Declined' : 'Waiting for card…')
 
-        if (s === 'APPROVED' || s === 'DECLINED') {
+        if (s === 'APPROVED') {
+          setTerminalStatus('Approved!')
           stopPolling()
-          if (s === 'APPROVED' && terminalPaymentId) {
+          if (terminalPaymentId) {
             confirmTerminal.mutate({
               payment_id: terminalPaymentId,
               helcim_transaction_id: terminalTxnId,
               customer_id: customer?.id ?? null,
             })
-          } else {
-            toast.error('Card declined')
           }
+        } else if (s === 'DECLINED' || s === 'CANCELLED') {
+          setTerminalStatus('Declined')
+          stopPolling()
+          toast.error('Card declined')
+          setStep('select')
+        } else {
+          // Still pending — reschedule at fast or slow interval
+          pollRef.current = setTimeout(tick, elapsed < POLL_FAST_FOR_MS ? POLL_FAST_MS : POLL_SLOW_MS)
         }
-      } catch { /* network blip — keep polling */ }
-    }, 2000)
+      } catch {
+        // Network blip — keep going
+        pollRef.current = setTimeout(tick, elapsed < POLL_FAST_FOR_MS ? POLL_FAST_MS : POLL_SLOW_MS)
+      }
+    }
+
+    // Kick off immediately, then self-schedule
+    pollRef.current = setTimeout(tick, POLL_FAST_MS)
 
     return stopPolling
   }, [step, terminalTxnId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -191,8 +199,6 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   const handleSubmit = () => {
     if (method === 'cash') { setStep('cash_entry'); return }
 
-    if (method === 'keyed_card') { setStep('keyed_card'); return }
-
     if (method === 'card_terminal') {
       const tid = selectedTerminalId ?? terminals[0]?.terminalId?.toString()
       if (!tid) { toast.error('No terminal selected'); return }
@@ -216,25 +222,6 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
 
     // Manual methods: pay_on_collection, invoice, direct_deposit
     recordManual.mutate({ order_id: orderId, amount: grandTotal, method: method as 'pay_on_collection' | 'invoice' | 'direct_deposit' })
-  }
-
-  const handleKeyedSubmit = () => {
-    const rawNumber = cardNumber.replace(/\s/g, '')
-    const rawExpiry = cardExpiry.replace('/', '')
-    if (rawNumber.length < 13) { toast.error('Enter a valid card number'); return }
-    if (rawExpiry.length !== 4) { toast.error('Enter expiry as MM/YY'); return }
-    if (cardCVV.length < 3) { toast.error('Enter CVV'); return }
-
-    chargeKeyed.mutate({
-      order_id:    orderId,
-      amount:      grandTotal,
-      card_number: rawNumber,
-      card_expiry: rawExpiry,
-      card_cvv:    cardCVV,
-      card_name:   cardName || undefined,
-      save_card:   saveCard,
-      customer_id: customer?.id ?? null,
-    })
   }
 
   const handlePrepaidLookup = async () => {
@@ -454,82 +441,6 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
     )
   }
 
-  // ── Keyed card entry ──────────────────────────────────────────────────────
-
-  if (step === 'keyed_card') {
-    return (
-      <div className="flex flex-col gap-4">
-        <div className="text-center mb-1">
-          <p className="text-sm text-gray-500">Charge</p>
-          <p className="text-3xl font-bold text-gray-900">{formatCurrency(grandTotal)}</p>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Card Number</label>
-          <Input
-            value={cardNumber}
-            onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
-            placeholder="0000 0000 0000 0000"
-            inputMode="numeric"
-            className="font-mono text-lg h-12 tracking-widest text-center"
-            autoFocus
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Expiry (MM/YY)</label>
-            <Input
-              value={cardExpiry}
-              onChange={(e) => setCardExpiry(formatExpiry(e.target.value))}
-              placeholder="MM/YY"
-              inputMode="numeric"
-              className="font-mono text-lg h-11 text-center"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">CVV</label>
-            <Input
-              value={cardCVV}
-              onChange={(e) => setCardCVV(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              placeholder="000"
-              inputMode="numeric"
-              type="password"
-              className="font-mono text-lg h-11 text-center"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Cardholder Name <span className="font-normal">(optional)</span></label>
-          <Input
-            value={cardName}
-            onChange={(e) => setCardName(e.target.value)}
-            placeholder="Name on card"
-            className="h-10"
-          />
-        </div>
-
-        {customer && (
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={saveCard} onChange={(e) => setSaveCard(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
-            <span className="text-sm text-gray-700">
-              Save card to <span className="font-medium">{customer.first_name}</span>'s profile
-            </span>
-          </label>
-        )}
-
-        <div className="flex gap-2 pt-1">
-          <Button variant="outline" onClick={() => setStep('select')} className="flex-1">Back</Button>
-          <Button onClick={handleKeyedSubmit} disabled={chargeKeyed.isPending} className="flex-1 bg-green-600 hover:bg-green-700 text-white">
-            {chargeKeyed.isPending ? 'Charging…' : `Charge ${formatCurrency(grandTotal)}`}
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
   // ── Method selection ──────────────────────────────────────────────────────
 
   const tipPresets = tipMode === '$' ? TIP_PRESETS_DOLLARS : TIP_PRESETS_PERCENT
@@ -544,7 +455,6 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   const submitLabel = (() => {
     if (isSubmitting) return 'Processing…'
     if (method === 'cash') return 'Enter Cash'
-    if (method === 'keyed_card') return 'Enter Card'
     if (method === 'card_terminal') return 'Send to Terminal'
     if (method === 'pay_on_collection') return 'Confirm — Pay Later'
     return 'Confirm'

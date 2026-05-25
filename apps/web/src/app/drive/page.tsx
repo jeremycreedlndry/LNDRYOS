@@ -125,7 +125,7 @@ export default function DriveZonePicker() {
           onClick={handleSubmit}
           className="w-full bg-brand-600 text-white font-semibold py-4 rounded-2xl text-base active:bg-brand-700"
         >
-          START ROUTE
+          SHOW ROUTE
         </button>
       </div>
     </div>

@@ -1,10 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { X, MapPin } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import toast from 'react-hot-toast'
 import { useDebounce } from '@/hooks/useDebounce'
+import { AddressAutocomplete, type AddressFields } from '@/components/ui/AddressAutocomplete'
 
 function isoDate(d: Date) { return d.toISOString().split('T')[0] }
 
@@ -34,11 +35,19 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 250)
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerStub | null>(initialCustomer ?? null)
+  const [addressRaw, setAddressRaw] = useState('')
+  const [addressFields, setAddressFields] = useState<AddressFields | null>(null)
+
+  const needsAddress = !!selectedCustomer && !selectedCustomer.address_street
 
   const selectCustomer = (c: CustomerStub) => {
     setSelectedCustomer(c)
+    setAddressRaw('')
+    setAddressFields(null)
     if (c.driver_instructions) set('notes', c.driver_instructions)
   }
+
+  const updateCustomer = trpc.customers.update.useMutation()
 
   const [form, setForm] = useState({
     frequency: 'weekly' as 'once' | 'weekly' | 'biweekly' | 'monthly',
@@ -70,8 +79,21 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
     onError: (e) => toast.error(e.message),
   })
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!selectedCustomer) { toast.error('Select a customer'); return }
+    if (needsAddress && !addressFields?.street) {
+      toast.error('Please select an address from the suggestions')
+      return
+    }
+    // Save address to customer profile if provided
+    if (needsAddress && addressFields) {
+      await updateCustomer.mutateAsync({
+        id: selectedCustomer.id,
+        address_street: addressFields.street,
+        address_city: addressFields.city || null,
+        address_postal_code: addressFields.postal_code || null,
+      })
+    }
     create.mutate({
       customer_id: selectedCustomer.id,
       ...form,
@@ -127,6 +149,22 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
               </div>
             )}
           </div>
+
+          {/* Address prompt — shown when customer has no address */}
+          {needsAddress && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-amber-600 shrink-0" />
+                <p className="text-sm font-semibold text-amber-800">No address on file — please enter one</p>
+              </div>
+              <AddressAutocomplete
+                value={addressRaw}
+                onChange={setAddressRaw}
+                onSelect={(fields) => { setAddressFields(fields); setAddressRaw(fields.street + (fields.city ? `, ${fields.city}` : '')) }}
+                placeholder="Start typing address…"
+              />
+            </div>
+          )}
 
           {/* Frequency + day */}
           <div className="grid grid-cols-2 gap-4">
@@ -222,9 +260,9 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
             className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50">
             Cancel
           </button>
-          <button onClick={handleSave} disabled={!selectedCustomer || create.isPending}
+          <button onClick={handleSave} disabled={!selectedCustomer || create.isPending || updateCustomer.isPending}
             className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40">
-            {create.isPending ? 'Saving…' : 'Save Schedule'}
+            {create.isPending || updateCustomer.isPending ? 'Saving…' : 'Save Schedule'}
           </button>
         </div>
       </div>

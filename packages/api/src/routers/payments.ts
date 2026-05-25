@@ -2,11 +2,11 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, tenantProcedure } from '../trpc'
 import {
-  listTerminals,
-  purchaseWithCard,
+  listDevices,
   purchaseWithTerminal,
   chargeCardToken,
   getTransaction,
+  getTransactionByInvoice,
 } from '../lib/helcim'
 import { chargeCardInternal } from './prepaidCards'
 
@@ -55,90 +55,52 @@ async function recordPayment(
 
 export const paymentsRouter = router({
 
-  // ── List Helcim terminals ──────────────────────────────────────────────────
+  // ── List Helcim devices (card readers / smart terminals) ──────────────────
+  // Returns registered hardware devices — the 4-char code is used to initiate
+  // a purchase on a specific device via POST /devices/{code}/payment/purchase
   listTerminals: tenantProcedure.query(async () => {
     try {
-      return await listTerminals()
+      const devices = await listDevices()
+      // Normalise to the shape the POS already expects
+      return devices.map(d => ({
+        terminalId:   d.code,
+        terminalName: d.code,   // Helcim devices only expose the code, no nickname
+        status:       'ACTIVE',
+        currency:     'CAD',
+      }))
     } catch {
       return []
     }
   }),
 
   // ── Poll a Helcim transaction (for terminal payment status) ───────────────
+  // 1. Check our own DB first — webhook may have already updated it (fast path)
+  // 2. If still pending, fall back to Helcim API (localhost / missed webhook)
   pollTransaction: tenantProcedure
     .input(z.object({ transactionId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      // Check our DB — webhook updates this the instant Helcim fires
+      const { data: payment } = await ctx.supabase
+        .from('payments')
+        .select('status, helcim_transaction_id, helcim_card_token, card_last4, card_brand')
+        .eq('helcim_transaction_id', input.transactionId)
+        .eq('tenant_id', ctx.tenantId)
+        .maybeSingle()
+
+      if (payment?.status === 'paid') {
+        return { transactionId: payment.helcim_transaction_id ?? input.transactionId, status: 'APPROVED' }
+      }
+      if (payment?.status === 'declined') {
+        return { transactionId: input.transactionId, status: 'DECLINED' }
+      }
+
+      // Still pending — fall back to Helcim API (works on localhost where webhooks can't reach)
+      if (/^[0-9a-f]{32}$/i.test(input.transactionId)) {
+        const txn = await getTransactionByInvoice(input.transactionId)
+        if (txn) return txn
+        return { transactionId: input.transactionId, status: 'PENDING' }
+      }
       return getTransaction(input.transactionId)
-    }),
-
-  // ── Keyed card entry (card-not-present) ───────────────────────────────────
-  chargeKeyed: tenantProcedure
-    .input(z.object({
-      order_id:       z.string().uuid(),
-      amount:         z.number().int().positive(),
-      card_number:    z.string().min(13).max(19),
-      card_expiry:    z.string().regex(/^\d{4}$/, 'Expiry must be MMYY'),
-      card_cvv:       z.string().min(3).max(4),
-      card_name:      z.string().optional(),
-      save_card:      z.boolean().default(false),
-      customer_id:    z.string().uuid().nullable().optional(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const idempotencyKey = input.order_id.replace(/-/g, '')
-
-      let result
-      try {
-        result = await purchaseWithCard({
-          amountCents:     input.amount,
-          cardNumber:      input.card_number,
-          cardExpiry:      input.card_expiry,
-          cardCVV:         input.card_cvv,
-          cardHolderName:  input.card_name,
-          saveCard:        input.save_card,
-          idempotencyKey,
-          ipAddress:       ctx.ip,
-        })
-      } catch (err) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: (err as Error).message })
-      }
-
-      const approved = result.status?.toUpperCase() === 'APPROVED'
-      if (!approved) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: `Card declined: ${result.status}` })
-      }
-
-      // Save card token to customer if requested
-      if (input.save_card && result.cardToken && input.customer_id) {
-        await ctx.supabase
-          .from('customers')
-          .update({
-            helcim_card_token:  result.cardToken,
-            saved_card_last4:   result.cardNumber?.slice(-4) ?? null,
-            saved_card_brand:   result.cardType ?? null,
-          })
-          .eq('id', input.customer_id)
-          .eq('tenant_id', ctx.tenantId)
-      }
-
-      const payment = await recordPayment(ctx.supabase, {
-        tenantId:             ctx.tenantId,
-        orderId:              input.order_id,
-        amount:               input.amount,
-        method:               'card_present',
-        status:               'paid',
-        processedBy:          ctx.userId,
-        helcimTransactionId:  String(result.transactionId),
-        helcimCardToken:      result.cardToken,
-        cardLast4:            result.cardNumber?.slice(-4),
-        cardBrand:            result.cardType,
-      })
-
-      return {
-        ...payment,
-        card_last4: result.cardNumber?.slice(-4),
-        card_brand: result.cardType,
-        approval_code: result.approvalCode,
-      }
     }),
 
   // ── Terminal purchase ─────────────────────────────────────────────────────
@@ -151,34 +113,36 @@ export const paymentsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const idempotencyKey = input.order_id.replace(/-/g, '')
 
-      let result
+      // Use order_id (without dashes) as the invoiceNumber so we can poll for
+      // the transaction after Helcim returns 202 with an empty body
+      const invoiceNumber = idempotencyKey  // same value: order_id without dashes
+
       try {
-        result = await purchaseWithTerminal({
+        await purchaseWithTerminal({
           amountCents:    input.amount,
-          terminalId:     input.terminal_id,
+          deviceCode:     input.terminal_id,
           idempotencyKey,
+          invoiceNumber,
         })
       } catch (err) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: (err as Error).message })
       }
 
-      // Terminal payments start as pending — the UI polls pollTransaction
-      const status = result.status?.toUpperCase() === 'APPROVED' ? 'paid' : 'pending'
-
+      // Payment is pending — record it now; confirmTerminalPayment updates it on approval
       const payment = await recordPayment(ctx.supabase, {
         tenantId:            ctx.tenantId,
         orderId:             input.order_id,
         amount:              input.amount,
         method:              'card_present',
-        status,
+        status:              'pending',
         processedBy:         ctx.userId,
-        helcimTransactionId: String(result.transactionId),
+        helcimTransactionId: invoiceNumber,  // placeholder until real txn ID known
       })
 
       return {
         ...payment,
-        helcim_transaction_id: String(result.transactionId),
-        initial_status: result.status,
+        helcim_transaction_id: invoiceNumber,
+        initial_status: 'PENDING',
       }
     }),
 
@@ -190,17 +154,36 @@ export const paymentsRouter = router({
       customer_id:        z.string().uuid().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Get final transaction data
-      const txn = await getTransaction(input.helcim_transaction_id)
+      // Check if webhook already confirmed this payment — if so, short-circuit
+      const { data: existing } = await ctx.supabase
+        .from('payments')
+        .select('status, helcim_card_token, card_last4, card_brand')
+        .eq('id', input.payment_id)
+        .eq('tenant_id', ctx.tenantId)
+        .single()
+
+      if (existing?.status === 'paid') {
+        return { approved: true, card_last4: existing.card_last4, card_brand: existing.card_brand }
+      }
+
+      // Webhook hasn't fired yet (localhost) — fetch from Helcim as fallback
+      let txn
+      if (/^[0-9a-f]{32}$/i.test(input.helcim_transaction_id)) {
+        txn = await getTransactionByInvoice(input.helcim_transaction_id)
+        if (!txn) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transaction not found' })
+      } else {
+        txn = await getTransaction(input.helcim_transaction_id)
+      }
       const approved = txn.status?.toUpperCase() === 'APPROVED'
 
       const { error } = await ctx.supabase
         .from('payments')
         .update({
-          status:            approved ? 'paid' : 'declined',
-          helcim_card_token: txn.cardToken ?? null,
-          card_last4:        txn.cardNumber?.slice(-4) ?? null,
-          card_brand:        txn.cardType ?? null,
+          status:                approved ? 'paid' : 'declined',
+          helcim_transaction_id: String(txn.transactionId),
+          helcim_card_token:     txn.cardToken          ?? null,
+          card_last4:            txn.cardNumber?.slice(-4) ?? null,
+          card_brand:            txn.cardType            ?? null,
         })
         .eq('id', input.payment_id)
         .eq('tenant_id', ctx.tenantId)

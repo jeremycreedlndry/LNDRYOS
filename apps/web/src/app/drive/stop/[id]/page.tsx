@@ -4,7 +4,7 @@ import { useState, Suspense } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft, Phone, Navigation, AlertTriangle, Camera,
-  Package, CheckCircle, XCircle, ChevronRight, User
+  Package, CheckCircle, XCircle, ChevronRight, User, MinusCircle
 } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
@@ -121,6 +121,61 @@ function IssueModal({ onSubmit, onCancel }: {
   )
 }
 
+// ─── Nothing to pickup modal ──────────────────────────────────────────────────
+const NOTHING_REASONS = [
+  { id: 'nothing_here', label: 'Nothing to pick up', emoji: '📦' },
+  { id: 'not_home',     label: 'Not home / no answer', emoji: '🚪' },
+] as const
+
+function NothingToPickupModal({ onSubmit, onCancel }: {
+  onSubmit: (reason: string) => void
+  onCancel: () => void
+}) {
+  const [selected, setSelected] = useState<string | null>(null)
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 bg-black/50">
+      <div className="w-full max-w-sm bg-white rounded-2xl overflow-hidden">
+        <div className="p-5">
+          <p className="font-semibold text-gray-900 mb-4">Nothing to pick up</p>
+          <div className="space-y-2 mb-5">
+            {NOTHING_REASONS.map(r => (
+              <button
+                key={r.id}
+                onClick={() => setSelected(r.id)}
+                className={cn(
+                  'w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border-2 text-left transition-colors',
+                  selected === r.id
+                    ? 'border-brand-600 bg-brand-50'
+                    : 'border-gray-200 bg-white'
+                )}
+              >
+                <span className="text-xl">{r.emoji}</span>
+                <span className={cn(
+                  'text-sm font-semibold',
+                  selected === r.id ? 'text-brand-700' : 'text-gray-800'
+                )}>{r.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-3">
+            <button onClick={onCancel}
+              className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm">
+              Cancel
+            </button>
+            <button
+              onClick={() => selected && onSubmit(NOTHING_REASONS.find(r => r.id === selected)!.label)}
+              disabled={!selected}
+              className="flex-1 py-3 rounded-xl bg-gray-800 text-white font-semibold text-sm disabled:opacity-40"
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main stop detail ─────────────────────────────────────────────────────────
 function StopDetailInner() {
   const router = useRouter()
@@ -132,6 +187,7 @@ function StopDetailInner() {
   const [driverNotes, setDriverNotes] = useState('')
   const [bagCount, setBagCount] = useState<string>('')
   const [showIssueModal, setShowIssueModal] = useState(false)
+  const [showNothingModal, setShowNothingModal] = useState(false)
   const [showPickupPrompt, setShowPickupPrompt] = useState(false)
   const [completing, setCompleting] = useState(false)
 
@@ -233,6 +289,17 @@ function StopDetailInner() {
       driver_notes: notes || null,
     })
     toast.success('Issue reported')
+    router.push(backHref)
+  }
+
+  const handleNothingToPickup = (reason: string) => {
+    setShowNothingModal(false)
+    completeStop.mutate({
+      id: stopId,
+      status: 'failed',
+      driver_notes: reason,
+    })
+    toast.success('Stop recorded')
     router.push(backHref)
   }
 
@@ -477,22 +544,35 @@ function StopDetailInner() {
 
       {/* Bottom action bar — claim/complete */}
       {isMine && !isComplete && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 safe-bottom flex gap-3">
-          <button
-            onClick={() => setShowIssueModal(true)}
-            className="flex items-center justify-center gap-2 px-4 py-4 rounded-2xl border-2 border-red-200 text-red-600 font-semibold"
-          >
-            <XCircle className="h-5 w-5" />
-            Issue
-          </button>
-          <button
-            onClick={handleComplete}
-            disabled={completing || completeStop.isPending}
-            className="flex-1 flex items-center justify-center gap-2 bg-brand-600 text-white font-semibold py-4 rounded-2xl text-base active:bg-brand-700 disabled:opacity-60"
-          >
-            <CheckCircle className="h-5 w-5" />
-            {completing ? 'Saving…' : isDelivery ? 'Mark Delivered' : 'Mark Picked Up'}
-          </button>
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 safe-bottom">
+          {/* Primary action */}
+          <div className="px-4 pt-3 pb-2">
+            <button
+              onClick={handleComplete}
+              disabled={completing || completeStop.isPending}
+              className="w-full flex items-center justify-center gap-2 bg-brand-600 text-white font-semibold py-4 rounded-2xl text-base active:bg-brand-700 disabled:opacity-60"
+            >
+              <CheckCircle className="h-5 w-5" />
+              {completing ? 'Saving…' : isDelivery ? 'Mark Delivered' : 'Mark Picked Up'}
+            </button>
+          </div>
+          {/* Secondary actions */}
+          <div className="px-4 pb-4 flex gap-2">
+            <button
+              onClick={() => setShowNothingModal(true)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl border-2 border-gray-200 text-gray-600 font-semibold text-sm active:bg-gray-50"
+            >
+              <MinusCircle className="h-4 w-4" />
+              Nothing to Pick Up
+            </button>
+            <button
+              onClick={() => setShowIssueModal(true)}
+              className="flex items-center justify-center gap-1.5 px-4 py-3 rounded-2xl border-2 border-red-200 text-red-600 font-semibold text-sm active:bg-red-50"
+            >
+              <XCircle className="h-4 w-4" />
+              Issue
+            </button>
+          </div>
         </div>
       )}
 
@@ -511,6 +591,9 @@ function StopDetailInner() {
       {/* Modals */}
       {showIssueModal && (
         <IssueModal onSubmit={handleFailed} onCancel={() => setShowIssueModal(false)} />
+      )}
+      {showNothingModal && (
+        <NothingToPickupModal onSubmit={handleNothingToPickup} onCancel={() => setShowNothingModal(false)} />
       )}
       {showPickupPrompt && (
         <PickupPromptModal onYes={handlePickupYes} onNo={handlePickupNo} />

@@ -24,7 +24,11 @@ async function helcimFetch<T = unknown>(
   if (idempotencyKey) headers['idempotency-key'] = idempotencyKey
 
   const res = await fetch(`${BASE}${path}`, { ...init, headers })
-  const json = await res.json()
+
+  // Some endpoints (e.g. POST /devices/{code}/payment/purchase) return 202 with an empty body
+  const text = await res.text()
+  const json = text ? JSON.parse(text) : {}
+
   if (!res.ok) {
     // Helcim errors can be array, object, or string
     let msg: string
@@ -60,68 +64,60 @@ export interface HelcimChargeResult {
 }
 
 // ─── List terminals ───────────────────────────────────────────────────────────
+// GET /card-terminals/ → array of CardTerminal objects
+// GET /devices/        → array of registered hardware devices (code + dateCreated)
+//
+// We use card-terminals for display (id, nickname, status) and devices for the
+// 4-char code needed to initiate a hardware purchase.
 
 export interface HelcimTerminal {
-  terminalId:   number | string
-  terminalName: string
-  status:       string
+  terminalId:   number | string  // card-terminal id
+  terminalName: string           // nickname
+  status:       string           // ACTIVE | INACTIVE
   currency:     string
 }
 
-export async function listTerminals(): Promise<HelcimTerminal[]> {
-  const res = await helcimFetch<{ terminals?: HelcimTerminal[] }>('/terminals')
-  return res.terminals ?? []
+export interface HelcimDevice {
+  code: string  // 4-char alphanumeric, used as path param for /devices/{code}/payment/purchase
+  dateCreated: string
 }
 
-// ─── Keyed card entry (card-not-present, sandbox/phone orders) ────────────────
+export async function listTerminals(): Promise<HelcimTerminal[]> {
+  const res = await helcimFetch<Array<{ id: number; nickname: string; status: string; currency: string }>>('/card-terminals/')
+  return (res ?? []).map(t => ({
+    terminalId:   t.id,
+    terminalName: t.nickname,
+    status:       t.status,
+    currency:     t.currency,
+  }))
+}
 
-export async function purchaseWithCard(params: {
-  amountCents:    number
-  cardNumber:     string
-  cardExpiry:     string   // MMYY
-  cardCVV:        string
-  cardHolderName?: string
-  saveCard?:      boolean
-  customerCode?:  string
-  idempotencyKey: string
-  currency?:      string
-  ipAddress?:     string
-}): Promise<HelcimChargeResult> {
-  return helcimFetch<HelcimChargeResult>('/payment/purchase', {
-    method: 'POST',
-    idempotencyKey: params.idempotencyKey,
-    body: JSON.stringify({
-      ipAddress:    params.ipAddress ?? '127.0.0.1',
-      currency:     params.currency ?? 'CAD',
-      amount:       +(params.amountCents / 100).toFixed(2),
-      ...(params.saveCard ? { saveCard: 1 } : {}),
-      ...(params.customerCode ? { customerCode: params.customerCode } : {}),
-      cardData: {
-        cardNumber:     params.cardNumber.replace(/\s/g, ''),
-        cardExpiry:     params.cardExpiry.replace(/\D/g, ''),
-        cardCVV:        params.cardCVV,
-        ...(params.cardHolderName ? { cardHolderName: params.cardHolderName } : {}),
-      },
-    }),
-  })
+export async function listDevices(): Promise<HelcimDevice[]> {
+  const res = await helcimFetch<HelcimDevice[]>('/devices/')
+  return res ?? []
 }
 
 // ─── Terminal purchase (card-present, physical device) ───────────────────────
-// Helcim activates the terminal; poll getTransaction() for the result.
+// POST /devices/{code}/payment/purchase
+// {code} is the 4-char device code (e.g. "AYAB") from GET /devices/
+// Helcim wakes the terminal; poll getTransaction() for the result.
 
 export async function purchaseWithTerminal(params: {
   amountCents:    number
-  terminalId:     string | number
+  deviceCode:     string   // 4-char code from listDevices()
   idempotencyKey: string
   currency?:      string
+  invoiceNumber?: string
+  customerCode?:  string
 }): Promise<HelcimChargeResult> {
-  return helcimFetch<HelcimChargeResult>('/payment/purchase', {
+  return helcimFetch<HelcimChargeResult>(`/devices/${params.deviceCode}/payment/purchase`, {
     method: 'POST',
     idempotencyKey: params.idempotencyKey,
     body: JSON.stringify({
-      currency:   params.currency ?? 'CAD',
-      amount:     +(params.amountCents / 100).toFixed(2),
-      terminalId: Number(params.terminalId),
+      currency:          params.currency ?? 'CAD',
+      transactionAmount: +(params.amountCents / 100).toFixed(2),
+      ...(params.invoiceNumber ? { invoiceNumber: params.invoiceNumber } : {}),
+      ...(params.customerCode  ? { customerCode:  params.customerCode  } : {}),
     }),
   })
 }
@@ -163,6 +159,14 @@ export interface HelcimTransaction {
 
 export async function getTransaction(transactionId: string | number): Promise<HelcimTransaction> {
   return helcimFetch<HelcimTransaction>(`/card-transactions/${transactionId}`)
+}
+
+// Poll for a transaction by invoiceNumber — used after a device purchase (202 no body)
+export async function getTransactionByInvoice(invoiceNumber: string): Promise<HelcimTransaction | null> {
+  const res = await helcimFetch<HelcimTransaction[]>(
+    `/card-transactions/?invoiceNumber=${encodeURIComponent(invoiceNumber)}&limit=1`
+  )
+  return Array.isArray(res) && res.length > 0 ? res[0] : null
 }
 
 // ─── HelcimPay.js initialization (kept for reference) ────────────────────────

@@ -552,7 +552,9 @@ function POSInner() {
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
             <h2 className="mb-4 text-lg font-bold text-gray-900">Payment</h2>
             <PaymentModal orderId={paymentOrderId} totalCents={orderTotal}
-              customer={customer} onComplete={handlePaymentComplete} onCancel={() => setPaymentOrderId(null)} />
+              customer={customer}
+              excludeMethods={cartLines.some(l => l.category === 'gift_card') ? ['prepaid_card'] : undefined}
+              onComplete={handlePaymentComplete} onCancel={() => setPaymentOrderId(null)} />
           </div>
         </div>
       )}

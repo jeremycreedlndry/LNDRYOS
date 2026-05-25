@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, CreditCard, DollarSign, Banknote, FileText, ChevronRight, Send, Plus, MessageSquare, Truck, Trash2, Monitor } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { X, CreditCard, DollarSign, Banknote, FileText, ChevronRight, Send, Plus, MessageSquare, Truck, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AddressAutocomplete } from '@/components/ui/AddressAutocomplete'
@@ -144,194 +144,43 @@ function PrefSelect({ label, value, onChange, options }: {
 
 // ─── Add Card Modal ───────────────────────────────────────────────────────────
 
-type AddCardStep =
-  | { type: 'choose' }
-  | { type: 'terminal_select' }
-  | { type: 'terminal_waiting'; invoiceNumber: string }
-  | { type: 'success'; card_last4: string | null | undefined; card_brand: string | null | undefined }
-  | { type: 'error'; message: string }
-
-function AddCardModal({ customerId, onClose, onSaved, onLaunchHelcim }: {
+function AddCardModal({ customerId, onClose, onLaunchHelcim }: {
   customerId: string
   onClose: () => void
-  onSaved: () => void
   /** Called with checkoutToken — parent launches HelcimPay.js and closes this modal */
   onLaunchHelcim: (checkoutToken: string) => void
 }) {
-  const utils = trpc.useUtils()
-  const [step, setStep] = useState<AddCardStep>({ type: 'choose' })
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [error, setError]         = useState<string | null>(null)
+  const initHelcimSession         = trpc.payments.initCardSaveSession.useMutation()
 
-  const { data: terminals = [] } = trpc.payments.listTerminals.useQuery()
-  const verifyViaTerminal = trpc.payments.verifyCardViaTerminal.useMutation()
-  const initHelcimSession = trpc.payments.initCardSaveSession.useMutation()
-
-  // ── Poll for terminal verify result ───────────────────────────────────────
-  const startPolling = useCallback((invoiceNumber: string) => {
-    const poll = async () => {
-      try {
-        const result = await utils.payments.pollCardVerify.fetch({ invoiceNumber, customer_id: customerId })
-        if (result.status === 'APPROVED') {
-          utils.customers.getById.invalidate({ id: customerId })
-          setStep({ type: 'success', card_last4: result.card_last4, card_brand: result.card_brand })
-          return
-        }
-        if (result.status === 'DECLINED') {
-          setStep({ type: 'error', message: 'Card declined on terminal.' })
-          return
-        }
-        pollRef.current = setTimeout(poll, 1000)
-      } catch {
-        pollRef.current = setTimeout(poll, 1500)
-      }
-    }
-    pollRef.current = setTimeout(poll, 1000)
-  }, [customerId, utils])
-
-  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
-
-  // ── Handlers ──────────────────────────────────────────────────────────────
-
-  async function handleTerminalSelect(terminalId: string) {
-    try {
-      const { invoiceNumber } = await verifyViaTerminal.mutateAsync({ terminal_id: terminalId, customer_id: customerId })
-      setStep({ type: 'terminal_waiting', invoiceNumber })
-      startPolling(invoiceNumber)
-    } catch (err) {
-      setStep({ type: 'error', message: (err as Error).message })
-    }
-  }
-
-  async function handleManualEntry() {
-    try {
-      const session = await initHelcimSession.mutateAsync({ customer_id: customerId })
-      console.log('[AddCard] HelcimPay session ready, checkoutToken:', session.checkoutToken?.slice(0, 10))
-      // Hand off to parent — parent closes this modal first, then launches Helcim's overlay
-      onLaunchHelcim(session.checkoutToken)
-    } catch (err) {
-      console.error('[AddCard] initCardSaveSession failed:', err)
-      toast.error((err as Error).message ?? 'Failed to start card entry')
-      setStep({ type: 'error', message: (err as Error).message })
-    }
-  }
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  // Launch immediately on mount — no need for a "choose" step
+  useEffect(() => {
+    initHelcimSession.mutateAsync({ customer_id: customerId })
+      .then((session) => onLaunchHelcim(session.checkoutToken))
+      .catch((err) => setError((err as Error).message ?? 'Failed to start card entry'))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl overflow-hidden">
-
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <h2 className="text-base font-bold text-gray-900">Add Card on File</h2>
           <button type="button" onClick={onClose}><X className="h-5 w-5 text-gray-400" /></button>
         </div>
-
         <div className="px-6 py-5">
-
-          {/* Choose method */}
-          {step.type === 'choose' && (
-            <div className="space-y-3">
-              <p className="text-sm text-gray-500">How would you like to add the card?</p>
-              <button type="button"
-                onClick={() => setStep({ type: 'terminal_select' })}
-                className="w-full flex items-center gap-4 rounded-xl border border-gray-200 px-4 py-4 text-left hover:bg-gray-50 transition-colors">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 shrink-0">
-                  <Monitor className="h-5 w-5 text-brand-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">Terminal</p>
-                  <p className="text-xs text-gray-400">Customer taps or inserts card on the reader</p>
-                </div>
-              </button>
-              <button type="button"
-                onClick={handleManualEntry}
-                disabled={initHelcimSession.isPending}
-                className="w-full flex items-center gap-4 rounded-xl border border-gray-200 px-4 py-4 text-left hover:bg-gray-50 transition-colors disabled:opacity-50">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 shrink-0">
-                  <CreditCard className="h-5 w-5 text-brand-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">
-                    Manual Entry {initHelcimSession.isPending && <span className="text-gray-400 font-normal">Loading…</span>}
-                  </p>
-                  <p className="text-xs text-gray-400">Customer types card number on screen</p>
-                </div>
-              </button>
+          {error ? (
+            <div className="flex flex-col items-center gap-4 py-2 text-center">
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 w-full">{error}</p>
+              <button type="button" onClick={onClose} className="text-sm text-brand-600 hover:underline">Close</button>
             </div>
-          )}
-
-          {/* Select terminal */}
-          {step.type === 'terminal_select' && (
-            <div className="space-y-3">
-              <p className="text-sm text-gray-500">Select a terminal:</p>
-              {terminals.length === 0 ? (
-                <p className="text-sm text-gray-400 italic">No terminals found.</p>
-              ) : (
-                terminals.map((t) => (
-                  <button type="button" key={t.terminalId} onClick={() => handleTerminalSelect(String(t.terminalId))}
-                    disabled={verifyViaTerminal.isPending}
-                    className="w-full flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-brand-50 transition-colors disabled:opacity-50">
-                    <Monitor className="h-4 w-4 text-brand-600 shrink-0" />
-                    <span className="text-sm font-medium text-gray-900">{t.terminalName}</span>
-                    {verifyViaTerminal.isPending && <span className="ml-auto text-xs text-gray-400">Sending…</span>}
-                  </button>
-                ))
-              )}
-              <button type="button" onClick={() => setStep({ type: 'choose' })}
-                className="w-full text-sm text-gray-400 hover:text-gray-600 py-1">← Back</button>
-            </div>
-          )}
-
-          {/* Waiting on terminal */}
-          {step.type === 'terminal_waiting' && (
+          ) : (
             <div className="flex flex-col items-center gap-4 py-4 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-50">
                 <CreditCard className="h-7 w-7 text-brand-600 animate-pulse" />
               </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-900">Waiting for card…</p>
-                <p className="text-xs text-gray-400 mt-1">Ask the customer to tap or insert their card</p>
-              </div>
-              <button type="button" onClick={() => { if (pollRef.current) clearTimeout(pollRef.current); onClose() }}
-                className="text-xs text-gray-400 hover:text-gray-600 underline">Cancel</button>
+              <p className="text-sm text-gray-500">Opening secure card entry…</p>
             </div>
           )}
-
-          {/* Success */}
-          {step.type === 'success' && (
-            <div className="flex flex-col items-center gap-4 py-4 text-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-50">
-                <CreditCard className="h-7 w-7 text-green-600" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-900">Card saved!</p>
-                {step.card_last4 && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    {step.card_brand
-                      ? step.card_brand.charAt(0).toUpperCase() + step.card_brand.slice(1)
-                      : 'Card'} ···· {step.card_last4}
-                  </p>
-                )}
-              </div>
-              <button type="button" onClick={() => { onSaved(); onClose() }}
-                className="w-full rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
-                Done
-              </button>
-            </div>
-          )}
-
-          {/* Error */}
-          {step.type === 'error' && (
-            <div className="flex flex-col items-center gap-4 py-4 text-center">
-              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 w-full">
-                {step.message}
-              </p>
-              <button type="button" onClick={() => setStep({ type: 'choose' })}
-                className="text-sm text-brand-600 hover:underline">Try again</button>
-            </div>
-          )}
-
         </div>
       </div>
     </div>
@@ -704,7 +553,6 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
         <AddCardModal
           customerId={customer.id}
           onClose={() => setShowAddCard(false)}
-          onSaved={() => utils.customers.getById.invalidate({ id: customer.id })}
           onLaunchHelcim={launchHelcim}
         />
       )}

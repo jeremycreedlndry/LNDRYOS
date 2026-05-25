@@ -112,12 +112,13 @@ export default function PayPage() {
       }
 
       if (eventStatus === 'SUCCESS') {
-        const txn = eventMessage ?? {}
-        const transactionId  = txn.transactionId ?? txn.transaction?.transactionId
-        const amountCents    = txn.amount        ? Math.round(txn.amount * 100) : null
-        const cardToken      = txn.cardToken      ?? txn.transaction?.cardToken
-        const cardLast4      = txn.cardNumber     ?? txn.transaction?.cardNumber  // last 4
-        const cardBrand      = txn.cardType       ?? txn.transaction?.cardType
+        // Helcim event structure: eventMessage.data contains the transaction object
+        const txn = eventMessage?.data ?? eventMessage ?? {}
+        const transactionId  = txn.transactionId
+        const amountCents    = txn.amount ? Math.round(txn.amount * 100) : null
+        const cardToken      = txn.cardToken
+        const cardLast4      = txn.cardNumber   // F4L4 masked number
+        const cardBrand      = txn.cardType
 
         // Confirm server-side
         const res = await fetch('/api/pay/helcim-confirm', {

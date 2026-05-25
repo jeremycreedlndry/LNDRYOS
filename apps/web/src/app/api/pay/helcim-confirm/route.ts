@@ -88,13 +88,15 @@ export async function POST(req: NextRequest) {
 
   // Record payment
   const { error: payErr } = await supabase.from('payments').insert({
-    order_id:       order.id,
-    tenant_id:      order.tenant_id,
-    amount:         paidCents,
-    method:         'card_online',
-    payment_status: 'completed',
-    processed_at:   new Date().toISOString(),
-    notes:          `Helcim txn ${transaction_id}`,
+    order_id:              order.id,
+    tenant_id:             order.tenant_id,
+    amount:                paidCents,
+    method:                'card_online',
+    status:                'paid',
+    processed_by:          'customer',
+    helcim_transaction_id: String(transaction_id),
+    card_last4:            card_last4 ?? null,
+    card_brand:            card_brand ?? null,
   })
   if (payErr) return NextResponse.json({ error: payErr.message }, { status: 500 })
 

@@ -417,31 +417,31 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
     setHelcimToken(checkoutToken)
 
     const launch = () => {
-      // @ts-expect-error — Helcim global (appendHelcimPayIframe per Helcim docs)
-      if (typeof window.appendHelcimPayIframe === 'function') {
-        // @ts-expect-error
-        window.appendHelcimPayIframe(checkoutToken, true)
+      // @ts-expect-error
+      const fn = window.appendHelcimPayIframe
+      console.log('[AddCard] appendHelcimPayIframe typeof:', typeof fn, '| token length:', checkoutToken?.length)
+      if (typeof fn === 'function') {
+        fn(checkoutToken, true)
       } else {
         toast.error('Card entry could not load. Please try again.')
         setHelcimToken(null)
       }
     }
 
+    // Always remove stale element so a failed previous load doesn't block retries
     const existing = document.getElementById('helcim-pay-js')
-    if (!existing) {
-      const script = document.createElement('script')
-      script.id     = 'helcim-pay-js'
-      // Correct script URL per Helcim docs (version2.js is outdated)
-      script.src    = 'https://secure.helcim.app/helcim-pay/services/start.js'
-      script.onload = launch
-      script.onerror = () => {
-        toast.error('Card entry script failed to load.')
-        setHelcimToken(null)
-      }
-      document.body.appendChild(script)
-    } else {
-      launch()
+    if (existing) existing.remove()
+
+    const script = document.createElement('script')
+    script.id     = 'helcim-pay-js'
+    script.src    = 'https://secure.helcim.app/helcim-pay/services/start.js'
+    script.onload = launch
+    script.onerror = () => {
+      console.error('[AddCard] failed to load start.js')
+      toast.error('Card entry script failed to load.')
+      setHelcimToken(null)
     }
+    document.body.appendChild(script)
   }
 
   function handleSubmit(e: React.FormEvent) {

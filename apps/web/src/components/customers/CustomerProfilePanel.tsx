@@ -409,13 +409,24 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
     setShowAddCard(false)   // close our modal first — Helcim overlay needs a clear path
     setHelcimListening(true)
     const launch = () => {
+      // Log everything Helcim-related on window so we can find the right function name
+      const helcimKeys = Object.keys(window).filter(k =>
+        k.toLowerCase().includes('helcim') || k.toLowerCase().includes('iframe')
+      )
+      console.log('[AddCard] window keys after script load:', helcimKeys)
+
       // @ts-expect-error — Helcim global
-      if (typeof appendHelcimIframe === 'function') {
+      if (typeof window.appendHelcimIframe === 'function') {
         console.log('[AddCard] calling appendHelcimIframe')
         // @ts-expect-error
-        appendHelcimIframe(checkoutToken)
+        window.appendHelcimIframe(checkoutToken)
+      // @ts-expect-error
+      } else if (typeof window.helcimPay?.init === 'function') {
+        console.log('[AddCard] calling helcimPay.init')
+        // @ts-expect-error
+        window.helcimPay.init(checkoutToken)
       } else {
-        console.error('[AddCard] appendHelcimIframe not found on window — script may not have loaded')
+        console.error('[AddCard] no known Helcim launch function found. window keys:', helcimKeys)
         toast.error('Card entry could not load. Please try again.')
         setHelcimListening(false)
       }

@@ -74,27 +74,25 @@ export const paymentsRouter = router({
   }),
 
   // ── Poll a Helcim transaction (for terminal payment status) ───────────────
-  // 1. Check our own DB first — webhook may have already updated it (fast path)
-  // 2. If still pending, fall back to Helcim API (localhost / missed webhook)
+  // 1. Check our own DB by paymentId (fast — webhook updates this instantly)
+  // 2. Fall back to Helcim API if still pending (localhost / missed webhook)
   pollTransaction: tenantProcedure
-    .input(z.object({ transactionId: z.string() }))
+    .input(z.object({ transactionId: z.string(), paymentId: z.string().uuid().optional() }))
     .query(async ({ ctx, input }) => {
-      // Check our DB — webhook updates this the instant Helcim fires
-      const { data: payment } = await ctx.supabase
-        .from('payments')
-        .select('status, helcim_transaction_id, helcim_card_token, card_last4, card_brand')
-        .eq('helcim_transaction_id', input.transactionId)
-        .eq('tenant_id', ctx.tenantId)
-        .maybeSingle()
+      // Fast path — look up by our own payment ID (unaffected by helcim_transaction_id rewrites)
+      if (input.paymentId) {
+        const { data: payment } = await ctx.supabase
+          .from('payments')
+          .select('status, helcim_transaction_id')
+          .eq('id', input.paymentId)
+          .eq('tenant_id', ctx.tenantId)
+          .maybeSingle()
 
-      if (payment?.status === 'paid') {
-        return { transactionId: payment.helcim_transaction_id ?? input.transactionId, status: 'APPROVED' }
-      }
-      if (payment?.status === 'declined') {
-        return { transactionId: input.transactionId, status: 'DECLINED' }
+        if (payment?.status === 'paid')     return { transactionId: payment.helcim_transaction_id ?? input.transactionId, status: 'APPROVED' }
+        if (payment?.status === 'declined') return { transactionId: input.transactionId, status: 'DECLINED' }
       }
 
-      // Still pending — fall back to Helcim API (works on localhost where webhooks can't reach)
+      // Still pending — fall back to Helcim API (localhost where webhooks can't reach)
       if (/^[0-9a-f]{32}$/i.test(input.transactionId)) {
         const txn = await getTransactionByInvoice(input.transactionId)
         if (txn) return txn

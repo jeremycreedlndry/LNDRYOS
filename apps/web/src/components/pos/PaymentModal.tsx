@@ -140,7 +140,7 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
       }
 
       try {
-        const txn = await utils.payments.pollTransaction.fetch({ transactionId: terminalTxnId })
+        const txn = await utils.payments.pollTransaction.fetch({ transactionId: terminalTxnId, paymentId: terminalPaymentId ?? undefined })
         const s = txn.status?.toUpperCase()
 
         if (s === 'APPROVED') {

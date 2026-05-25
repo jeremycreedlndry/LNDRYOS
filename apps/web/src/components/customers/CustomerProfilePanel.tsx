@@ -344,8 +344,8 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
   const utils = trpc.useUtils()
   const [form, setForm]               = useState<CustomerFormData>(() => initForm(customer))
   const [showAddCard, setShowAddCard] = useState(false)
-  // Track whether we're waiting for HelcimPay.js to complete (modal is closed, Helcim overlay is open)
-  const [helcimListening, setHelcimListening] = useState(false)
+  // Stores the checkoutToken while waiting for HelcimPay.js to complete (modal closed, Helcim overlay open)
+  const [helcimToken, setHelcimToken] = useState<string | null>(null)
   const set = (k: keyof CustomerFormData, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }))
 
   const { data: priceLists = [] } = trpc.priceLists.list.useQuery()
@@ -374,78 +374,72 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
   const saveCardToken = trpc.payments.saveCardToken.useMutation()
 
   // ── HelcimPay.js message listener (lives here so modal can be closed) ─────
+  // Event format per Helcim docs: event.data.eventName === 'helcim-pay-js-{checkoutToken}'
+  // Card data is in event.data.eventMessage.data.{cardToken, cardNumber, cardType}
   useEffect(() => {
-    if (!helcimListening) return
+    if (!helcimToken) return
+    const identifierKey = `helcim-pay-js-${helcimToken}`
+
     const handler = async (event: MessageEvent) => {
-      if (typeof event.data !== 'object') return
-      const { eventType, eventStatus, data } = event.data as {
-        eventType?: string; eventStatus?: string
-        data?: { cardToken?: string; cardNumber?: string; cardType?: string }
-      }
-      if (eventType !== 'HELCIM_PAY_JS_TRANSACTION_COMPLETE') return
-      setHelcimListening(false)
-      if (eventStatus === 'SUCCESS' && data?.cardToken) {
+      if (!event.data || event.data.eventName !== identifierKey) return
+      setHelcimToken(null)
+
+      if (event.data.eventStatus === 'SUCCESS') {
+        const txn = event.data.eventMessage?.data as {
+          cardToken?: string; cardNumber?: string; cardType?: string
+        } | undefined
         try {
           await saveCardToken.mutateAsync({
             customer_id: customer.id,
-            card_token:  data.cardToken,
-            card_last4:  data.cardNumber?.slice(-4) ?? null,
-            card_brand:  data.cardType ?? null,
+            card_token:  txn?.cardToken ?? '',
+            card_last4:  txn?.cardNumber?.slice(-4) ?? null,
+            card_brand:  txn?.cardType  ?? null,
           })
           utils.customers.getById.invalidate({ id: customer.id })
           toast.success('Card saved!')
         } catch {
           toast.error('Failed to save card.')
         }
+        // Clean up Helcim's overlay
+        // @ts-expect-error
+        if (typeof window.removeHelcimPayIframe === 'function') window.removeHelcimPayIframe()
       } else {
         toast.error('Card entry cancelled or declined.')
       }
     }
+
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [helcimListening, customer.id, saveCardToken, utils])
+  }, [helcimToken, customer.id, saveCardToken, utils])
 
   function launchHelcim(checkoutToken: string) {
-    setShowAddCard(false)   // close our modal first — Helcim overlay needs a clear path
-    setHelcimListening(true)
-    const launch = () => {
-      // Log everything Helcim-related on window so we can find the right function name
-      const helcimKeys = Object.keys(window).filter(k =>
-        k.toLowerCase().includes('helcim') || k.toLowerCase().includes('iframe')
-      )
-      console.log('[AddCard] window keys after script load:', helcimKeys)
+    setShowAddCard(false)    // close our modal — Helcim overlay needs a clear path
+    setHelcimToken(checkoutToken)
 
-      // @ts-expect-error — Helcim global
-      if (typeof window.appendHelcimIframe === 'function') {
-        console.log('[AddCard] calling appendHelcimIframe')
+    const launch = () => {
+      // @ts-expect-error — Helcim global (appendHelcimPayIframe per Helcim docs)
+      if (typeof window.appendHelcimPayIframe === 'function') {
         // @ts-expect-error
-        window.appendHelcimIframe(checkoutToken)
-      // @ts-expect-error
-      } else if (typeof window.helcimPay?.init === 'function') {
-        console.log('[AddCard] calling helcimPay.init')
-        // @ts-expect-error
-        window.helcimPay.init(checkoutToken)
+        window.appendHelcimPayIframe(checkoutToken, true)
       } else {
-        console.error('[AddCard] no known Helcim launch function found. window keys:', helcimKeys)
         toast.error('Card entry could not load. Please try again.')
-        setHelcimListening(false)
+        setHelcimToken(null)
       }
     }
+
     const existing = document.getElementById('helcim-pay-js')
     if (!existing) {
-      console.log('[AddCard] loading helcim-pay-js script')
       const script = document.createElement('script')
       script.id     = 'helcim-pay-js'
-      script.src    = 'https://secure.myhelcim.com/js/version2.js'
+      // Correct script URL per Helcim docs (version2.js is outdated)
+      script.src    = 'https://secure.helcim.app/helcim-pay/services/start.js'
       script.onload = launch
       script.onerror = () => {
-        console.error('[AddCard] failed to load helcim-pay-js script')
         toast.error('Card entry script failed to load.')
-        setHelcimListening(false)
+        setHelcimToken(null)
       }
       document.body.appendChild(script)
     } else {
-      console.log('[AddCard] helcim-pay-js already loaded, launching directly')
       launch()
     }
   }

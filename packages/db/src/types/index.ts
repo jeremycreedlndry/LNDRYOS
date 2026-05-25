@@ -79,6 +79,14 @@ export interface OrderPreferenceOptions {
   wash_temperature?: string[]
 }
 
+export type DefaultPaymentType =
+  | 'saved_card'
+  | 'card_terminal'
+  | 'pay_on_collection'
+  | 'cash'
+  | 'direct_deposit'
+  | 'invoice'
+
 export interface TenantSettings {
   receipt_footer?: string
   tax_rate?: number
@@ -96,6 +104,8 @@ export interface TenantSettings {
   auto_email_ready?: boolean
   default_due_days?: number
   order_preference_options?: OrderPreferenceOptions
+  /** Default payment method pre-selected at checkout. Falls back to saved_card. */
+  default_payment_type?: DefaultPaymentType
 }
 
 export interface TenantAddress {

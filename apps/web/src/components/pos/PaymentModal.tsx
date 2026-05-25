@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatCurrency, cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc'
-import type { Customer } from '@laundry/db'
+import type { Customer, TenantSettings } from '@laundry/db'
 import toast from 'react-hot-toast'
 
 type Method = 'card_terminal' | 'saved_card' | 'prepaid_card' | 'cash' | 'pay_on_collection' | 'invoice' | 'direct_deposit'
@@ -36,9 +36,40 @@ interface Props {
   onCancel: () => void
 }
 
+const VALID_METHODS: Method[] = ['card_terminal', 'saved_card', 'pay_on_collection', 'cash', 'direct_deposit', 'invoice', 'prepaid_card']
+
+function resolveInitialMethod(customer: Customer | null | undefined, tenantSettings: TenantSettings | null | undefined): Method {
+  // 1. Customer-specific override (if set and not 'default')
+  const customerType = customer?.payment_type
+  if (customerType && customerType !== 'default' && VALID_METHODS.includes(customerType as Method)) {
+    // Saved card only if they actually have one
+    if (customerType === 'saved_card' && !customer?.saved_card_last4) return 'card_terminal'
+    return customerType as Method
+  }
+  // 2. Tenant default
+  const tenantDefault = tenantSettings?.default_payment_type
+  if (tenantDefault && VALID_METHODS.includes(tenantDefault as Method)) {
+    if (tenantDefault === 'saved_card' && !customer?.saved_card_last4) return 'card_terminal'
+    return tenantDefault as Method
+  }
+  // 3. Fallback: saved card if they have one, otherwise terminal
+  return customer?.saved_card_last4 ? 'saved_card' : 'card_terminal'
+}
+
 export function PaymentModal({ orderId, totalCents, customer, excludeMethods, onComplete, onCancel }: Props) {
-  const [step, setStep] = useState<Step>('select')
-  const [method, setMethod] = useState<Method>('card_terminal')
+  const { data: tenant } = trpc.tenants.getCurrent.useQuery()
+  const tenantSettings = tenant?.settings as TenantSettings | undefined
+
+  const [step, setStep]           = useState<Step>('select')
+  const [methodTouched, setMethodTouched] = useState(false)
+  const [method, setMethod]       = useState<Method>(() => resolveInitialMethod(customer, tenantSettings))
+
+  // Re-resolve once tenant settings load (they're async), but don't override if user already picked
+  useEffect(() => {
+    if (!methodTouched && tenantSettings) {
+      setMethod(resolveInitialMethod(customer, tenantSettings))
+    }
+  }, [tenantSettings]) // eslint-disable-line react-hooks/exhaustive-deps
   const [tipMode, setTipMode] = useState<TipMode>('$')
   const [tipPreset, setTipPreset] = useState<number | null>(null)
   const [tipCustom, setTipCustom] = useState('')
@@ -472,7 +503,7 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
         {METHODS.filter(({ id }) => !excludeMethods?.includes(id)).map(({ id, label, icon: Icon }) => {
           const disabled = methodDisabled(id)
           return (
-            <button key={id} onClick={() => !disabled && setMethod(id)}
+            <button key={id} onClick={() => { if (!disabled) { setMethod(id); setMethodTouched(true) } }}
               disabled={disabled}
               className={cn(
                 'flex flex-col items-center gap-1.5 rounded-xl border-2 py-3 px-1 transition-colors',

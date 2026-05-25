@@ -144,6 +144,9 @@ export function StoreTab() {
   const [taxRate, setTaxRate] = useState('')
   const [taxId, setTaxId] = useState('')
 
+  // Payments
+  const [defaultPaymentType, setDefaultPaymentType] = useState<string>('saved_card')
+
   useEffect(() => {
     if (!tenant || ready) return
     const s = tenant.settings as TenantSettings
@@ -160,6 +163,7 @@ export function StoreTab() {
     setOffersPickupDelivery(s?.offers_pickup_delivery ?? false)
     setOffersWashFold(s?.offers_wash_fold ?? true)
     setHours(s?.hours ?? DEFAULT_HOURS)
+    setDefaultPaymentType(s?.default_payment_type ?? 'saved_card')
 
     if (a) {
       setAddress({
@@ -201,6 +205,7 @@ export function StoreTab() {
         offers_pickup_delivery: offersPickupDelivery,
         offers_wash_fold: offersWashFold,
         hours,
+        default_payment_type: defaultPaymentType as 'saved_card' | 'card_terminal' | 'pay_on_collection' | 'cash' | 'direct_deposit' | 'invoice',
       },
     })
   }
@@ -383,6 +388,25 @@ export function StoreTab() {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Tax registration number</label>
           <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="123456789 RT0001" />
+        </div>
+      </Section>
+
+      <Section title="Payments">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Default payment method at checkout</label>
+          <p className="text-xs text-gray-500 mb-2">Pre-selects this method when opening the payment screen. Overridden per-customer if they have a different payment type set.</p>
+          <select
+            value={defaultPaymentType}
+            onChange={(e) => setDefaultPaymentType(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="saved_card">Saved Card</option>
+            <option value="card_terminal">Terminal</option>
+            <option value="pay_on_collection">Pay on Collection</option>
+            <option value="cash">Cash</option>
+            <option value="direct_deposit">E-Transfer</option>
+            <option value="invoice">Invoice</option>
+          </select>
         </div>
       </Section>
 

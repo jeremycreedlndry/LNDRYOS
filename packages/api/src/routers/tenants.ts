@@ -59,6 +59,9 @@ export const tenantsRouter = router({
         auto_sms_ready: z.boolean().optional(),
         auto_email_ready: z.boolean().optional(),
         default_due_days: z.number().int().positive().optional(),
+        default_payment_type: z.enum([
+          'saved_card', 'card_terminal', 'pay_on_collection', 'cash', 'direct_deposit', 'invoice',
+        ]).optional(),
         order_preference_options: z.object({
           bleach: z.array(z.string()).optional(),
           dryer_sheets: z.array(z.string()).optional(),

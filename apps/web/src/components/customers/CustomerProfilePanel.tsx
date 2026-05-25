@@ -58,7 +58,15 @@ const DEFAULT_PREFERENCE_OPTIONS: Required<OrderPreferenceOptions> = {
   wash_temperature: ['Cold', 'Warm', 'Hot'],
 }
 
-const PAYMENT_TYPES   = ['Default', 'Cash', 'Account', 'Card']
+const PAYMENT_TYPES: { value: string; label: string }[] = [
+  { value: 'default',          label: 'Store Default'      },
+  { value: 'saved_card',       label: 'Saved Card'         },
+  { value: 'card_terminal',    label: 'Terminal'           },
+  { value: 'pay_on_collection',label: 'Pay on Collection'  },
+  { value: 'cash',             label: 'Cash'               },
+  { value: 'direct_deposit',   label: 'E-Transfer'         },
+  { value: 'invoice',          label: 'Invoice'            },
+]
 const INVOICE_STYLES  = ['Store Default', 'Detailed', 'Summary']
 const MARKETING_OPTIONS = ['No', 'Email', 'SMS', 'Email & SMS']
 
@@ -417,7 +425,12 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Payment Type</label>
-            <InlineSelect value={form.payment_type} onChange={(v) => set('payment_type', v)} options={PAYMENT_TYPES} />
+            <select value={form.payment_type} onChange={(e) => set('payment_type', e.target.value)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500">
+              {PAYMENT_TYPES.map((pt) => (
+                <option key={pt.value} value={pt.value}>{pt.label}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Invoice Style</label>

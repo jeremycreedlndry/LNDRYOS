@@ -147,24 +147,24 @@ function PrefSelect({ label, value, onChange, options }: {
 type AddCardStep =
   | { type: 'choose' }
   | { type: 'terminal_select' }
-  | { type: 'terminal_waiting'; invoiceNumber: string; terminalId: string }
-  | { type: 'helcim_loading' }
+  | { type: 'terminal_waiting'; invoiceNumber: string }
   | { type: 'success'; card_last4: string | null | undefined; card_brand: string | null | undefined }
   | { type: 'error'; message: string }
 
-function AddCardModal({ customerId, onClose, onSaved }: {
+function AddCardModal({ customerId, onClose, onSaved, onLaunchHelcim }: {
   customerId: string
   onClose: () => void
   onSaved: () => void
+  /** Called with checkoutToken — parent launches HelcimPay.js and closes this modal */
+  onLaunchHelcim: (checkoutToken: string) => void
 }) {
   const utils = trpc.useUtils()
   const [step, setStep] = useState<AddCardStep>({ type: 'choose' })
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { data: terminals = [] } = trpc.payments.listTerminals.useQuery()
-  const verifyViaTerminal  = trpc.payments.verifyCardViaTerminal.useMutation()
-  const initHelcimSession  = trpc.payments.initCardSaveSession.useMutation()
-  const saveCardToken      = trpc.payments.saveCardToken.useMutation()
+  const verifyViaTerminal = trpc.payments.verifyCardViaTerminal.useMutation()
+  const initHelcimSession = trpc.payments.initCardSaveSession.useMutation()
 
   // ── Poll for terminal verify result ───────────────────────────────────────
   const startPolling = useCallback((invoiceNumber: string) => {
@@ -180,7 +180,6 @@ function AddCardModal({ customerId, onClose, onSaved }: {
           setStep({ type: 'error', message: 'Card declined on terminal.' })
           return
         }
-        // Still pending — poll again
         pollRef.current = setTimeout(poll, 1000)
       } catch {
         pollRef.current = setTimeout(poll, 1500)
@@ -191,41 +190,12 @@ function AddCardModal({ customerId, onClose, onSaved }: {
 
   useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
 
-  // ── HelcimPay.js message listener ─────────────────────────────────────────
-  useEffect(() => {
-    if (step.type !== 'helcim_loading') return
-
-    const handler = async (event: MessageEvent) => {
-      if (typeof event.data !== 'object') return
-      const { eventType, eventStatus, data } = event.data as {
-        eventType?: string; eventStatus?: string
-        data?: { cardToken?: string; cardNumber?: string; cardType?: string }
-      }
-      if (eventType === 'HELCIM_PAY_JS_TRANSACTION_COMPLETE') {
-        if (eventStatus === 'SUCCESS' && data?.cardToken) {
-          await saveCardToken.mutateAsync({
-            customer_id: customerId,
-            card_token:  data.cardToken,
-            card_last4:  data.cardNumber?.slice(-4) ?? null,
-            card_brand:  data.cardType ?? null,
-          })
-          utils.customers.getById.invalidate({ id: customerId })
-          setStep({ type: 'success', card_last4: data.cardNumber?.slice(-4), card_brand: data.cardType })
-        } else {
-          setStep({ type: 'error', message: 'Card entry cancelled or declined.' })
-        }
-      }
-    }
-    window.addEventListener('message', handler)
-    return () => window.removeEventListener('message', handler)
-  }, [step.type, customerId, saveCardToken, utils])
-
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   async function handleTerminalSelect(terminalId: string) {
     try {
       const { invoiceNumber } = await verifyViaTerminal.mutateAsync({ terminal_id: terminalId, customer_id: customerId })
-      setStep({ type: 'terminal_waiting', invoiceNumber, terminalId })
+      setStep({ type: 'terminal_waiting', invoiceNumber })
       startPolling(invoiceNumber)
     } catch (err) {
       setStep({ type: 'error', message: (err as Error).message })
@@ -233,24 +203,10 @@ function AddCardModal({ customerId, onClose, onSaved }: {
   }
 
   async function handleManualEntry() {
-    setStep({ type: 'helcim_loading' })
     try {
       const session = await initHelcimSession.mutateAsync({ customer_id: customerId })
-      // Load HelcimPay.js and launch the iframe
-      const existing = document.getElementById('helcim-pay-js')
-      if (!existing) {
-        const script = document.createElement('script')
-        script.id  = 'helcim-pay-js'
-        script.src = 'https://secure.myhelcim.com/js/version2.js'
-        script.onload = () => {
-          // @ts-expect-error — Helcim global
-          if (typeof appendHelcimIframe === 'function') appendHelcimIframe(session.checkoutToken)
-        }
-        document.body.appendChild(script)
-      } else {
-        // @ts-expect-error — Helcim global
-        if (typeof appendHelcimIframe === 'function') appendHelcimIframe(session.checkoutToken)
-      }
+      // Hand off to parent — parent closes this modal first, then launches Helcim's overlay
+      onLaunchHelcim(session.checkoutToken)
     } catch (err) {
       setStep({ type: 'error', message: (err as Error).message })
     }
@@ -265,7 +221,7 @@ function AddCardModal({ customerId, onClose, onSaved }: {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <h2 className="text-base font-bold text-gray-900">Add Card on File</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-gray-400" /></button>
+          <button type="button" onClick={onClose}><X className="h-5 w-5 text-gray-400" /></button>
         </div>
 
         <div className="px-6 py-5">
@@ -274,7 +230,7 @@ function AddCardModal({ customerId, onClose, onSaved }: {
           {step.type === 'choose' && (
             <div className="space-y-3">
               <p className="text-sm text-gray-500">How would you like to add the card?</p>
-              <button
+              <button type="button"
                 onClick={() => setStep({ type: 'terminal_select' })}
                 className="w-full flex items-center gap-4 rounded-xl border border-gray-200 px-4 py-4 text-left hover:bg-gray-50 transition-colors">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 shrink-0">
@@ -285,14 +241,17 @@ function AddCardModal({ customerId, onClose, onSaved }: {
                   <p className="text-xs text-gray-400">Customer taps or inserts card on the reader</p>
                 </div>
               </button>
-              <button
+              <button type="button"
                 onClick={handleManualEntry}
-                className="w-full flex items-center gap-4 rounded-xl border border-gray-200 px-4 py-4 text-left hover:bg-gray-50 transition-colors">
+                disabled={initHelcimSession.isPending}
+                className="w-full flex items-center gap-4 rounded-xl border border-gray-200 px-4 py-4 text-left hover:bg-gray-50 transition-colors disabled:opacity-50">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 shrink-0">
                   <CreditCard className="h-5 w-5 text-brand-600" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-gray-900">Manual Entry</p>
+                  <p className="text-sm font-semibold text-gray-900">
+                    Manual Entry {initHelcimSession.isPending && <span className="text-gray-400 font-normal">Loading…</span>}
+                  </p>
                   <p className="text-xs text-gray-400">Customer types card number on screen</p>
                 </div>
               </button>
@@ -307,7 +266,7 @@ function AddCardModal({ customerId, onClose, onSaved }: {
                 <p className="text-sm text-gray-400 italic">No terminals found.</p>
               ) : (
                 terminals.map((t) => (
-                  <button key={t.terminalId} onClick={() => handleTerminalSelect(String(t.terminalId))}
+                  <button type="button" key={t.terminalId} onClick={() => handleTerminalSelect(String(t.terminalId))}
                     disabled={verifyViaTerminal.isPending}
                     className="w-full flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-brand-50 transition-colors disabled:opacity-50">
                     <Monitor className="h-4 w-4 text-brand-600 shrink-0" />
@@ -316,7 +275,7 @@ function AddCardModal({ customerId, onClose, onSaved }: {
                   </button>
                 ))
               )}
-              <button onClick={() => setStep({ type: 'choose' })}
+              <button type="button" onClick={() => setStep({ type: 'choose' })}
                 className="w-full text-sm text-gray-400 hover:text-gray-600 py-1">← Back</button>
             </div>
           )}
@@ -331,22 +290,7 @@ function AddCardModal({ customerId, onClose, onSaved }: {
                 <p className="text-sm font-semibold text-gray-900">Waiting for card…</p>
                 <p className="text-xs text-gray-400 mt-1">Ask the customer to tap or insert their card</p>
               </div>
-              <button onClick={() => { if (pollRef.current) clearTimeout(pollRef.current); onClose() }}
-                className="text-xs text-gray-400 hover:text-gray-600 underline">Cancel</button>
-            </div>
-          )}
-
-          {/* HelcimPay.js loading */}
-          {step.type === 'helcim_loading' && (
-            <div className="flex flex-col items-center gap-4 py-4 text-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-50">
-                <CreditCard className="h-7 w-7 text-brand-600 animate-pulse" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-900">Opening card entry…</p>
-                <p className="text-xs text-gray-400 mt-1">The customer can enter their card details</p>
-              </div>
-              <button onClick={onClose}
+              <button type="button" onClick={() => { if (pollRef.current) clearTimeout(pollRef.current); onClose() }}
                 className="text-xs text-gray-400 hover:text-gray-600 underline">Cancel</button>
             </div>
           )}
@@ -361,11 +305,13 @@ function AddCardModal({ customerId, onClose, onSaved }: {
                 <p className="text-sm font-semibold text-gray-900">Card saved!</p>
                 {step.card_last4 && (
                   <p className="text-xs text-gray-500 mt-1">
-                    {step.card_brand ?? 'Card'} ···· {step.card_last4}
+                    {step.card_brand
+                      ? step.card_brand.charAt(0).toUpperCase() + step.card_brand.slice(1)
+                      : 'Card'} ···· {step.card_last4}
                   </p>
                 )}
               </div>
-              <button onClick={() => { onSaved(); onClose() }}
+              <button type="button" onClick={() => { onSaved(); onClose() }}
                 className="w-full rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
                 Done
               </button>
@@ -378,7 +324,7 @@ function AddCardModal({ customerId, onClose, onSaved }: {
               <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 w-full">
                 {step.message}
               </p>
-              <button onClick={() => setStep({ type: 'choose' })}
+              <button type="button" onClick={() => setStep({ type: 'choose' })}
                 className="text-sm text-brand-600 hover:underline">Try again</button>
             </div>
           )}
@@ -393,8 +339,10 @@ function AddCardModal({ customerId, onClose, onSaved }: {
 
 function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => void }) {
   const utils = trpc.useUtils()
-  const [form, setForm]         = useState<CustomerFormData>(() => initForm(customer))
+  const [form, setForm]               = useState<CustomerFormData>(() => initForm(customer))
   const [showAddCard, setShowAddCard] = useState(false)
+  // Track whether we're waiting for HelcimPay.js to complete (modal is closed, Helcim overlay is open)
+  const [helcimListening, setHelcimListening] = useState(false)
   const set = (k: keyof CustomerFormData, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }))
 
   const { data: priceLists = [] } = trpc.priceLists.list.useQuery()
@@ -413,13 +361,68 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
     },
     onError: (e) => toast.error(e.message),
   })
-  const removeCard = trpc.payments.removeCard.useMutation({
+  const removeCard    = trpc.payments.removeCard.useMutation({
     onSuccess: () => {
       toast.success('Card removed')
       utils.customers.getById.invalidate({ id: customer.id })
     },
     onError: (e) => toast.error(e.message),
   })
+  const saveCardToken = trpc.payments.saveCardToken.useMutation()
+
+  // ── HelcimPay.js message listener (lives here so modal can be closed) ─────
+  useEffect(() => {
+    if (!helcimListening) return
+    const handler = async (event: MessageEvent) => {
+      if (typeof event.data !== 'object') return
+      const { eventType, eventStatus, data } = event.data as {
+        eventType?: string; eventStatus?: string
+        data?: { cardToken?: string; cardNumber?: string; cardType?: string }
+      }
+      if (eventType !== 'HELCIM_PAY_JS_TRANSACTION_COMPLETE') return
+      setHelcimListening(false)
+      if (eventStatus === 'SUCCESS' && data?.cardToken) {
+        try {
+          await saveCardToken.mutateAsync({
+            customer_id: customer.id,
+            card_token:  data.cardToken,
+            card_last4:  data.cardNumber?.slice(-4) ?? null,
+            card_brand:  data.cardType ?? null,
+          })
+          utils.customers.getById.invalidate({ id: customer.id })
+          toast.success('Card saved!')
+        } catch {
+          toast.error('Failed to save card.')
+        }
+      } else {
+        toast.error('Card entry cancelled or declined.')
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [helcimListening, customer.id, saveCardToken, utils])
+
+  function launchHelcim(checkoutToken: string) {
+    setShowAddCard(false)   // close our modal first — Helcim overlay needs a clear path
+    setHelcimListening(true)
+    const launch = () => {
+      // @ts-expect-error — Helcim global
+      if (typeof appendHelcimIframe === 'function') {
+        // @ts-expect-error
+        appendHelcimIframe(checkoutToken)
+      }
+    }
+    const existing = document.getElementById('helcim-pay-js')
+    if (!existing) {
+      const script = document.createElement('script')
+      script.id  = 'helcim-pay-js'
+      script.src = 'https://secure.myhelcim.com/js/version2.js'
+      script.onload = launch
+      document.body.appendChild(script)
+    } else {
+      launch()
+    }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -682,6 +685,7 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
           customerId={customer.id}
           onClose={() => setShowAddCard(false)}
           onSaved={() => utils.customers.getById.invalidate({ id: customer.id })}
+          onLaunchHelcim={launchHelcim}
         />
       )}
 

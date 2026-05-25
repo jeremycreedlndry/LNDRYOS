@@ -205,9 +205,12 @@ function AddCardModal({ customerId, onClose, onSaved, onLaunchHelcim }: {
   async function handleManualEntry() {
     try {
       const session = await initHelcimSession.mutateAsync({ customer_id: customerId })
+      console.log('[AddCard] HelcimPay session ready, checkoutToken:', session.checkoutToken?.slice(0, 10))
       // Hand off to parent — parent closes this modal first, then launches Helcim's overlay
       onLaunchHelcim(session.checkoutToken)
     } catch (err) {
+      console.error('[AddCard] initCardSaveSession failed:', err)
+      toast.error((err as Error).message ?? 'Failed to start card entry')
       setStep({ type: 'error', message: (err as Error).message })
     }
   }
@@ -408,18 +411,30 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
     const launch = () => {
       // @ts-expect-error — Helcim global
       if (typeof appendHelcimIframe === 'function') {
+        console.log('[AddCard] calling appendHelcimIframe')
         // @ts-expect-error
         appendHelcimIframe(checkoutToken)
+      } else {
+        console.error('[AddCard] appendHelcimIframe not found on window — script may not have loaded')
+        toast.error('Card entry could not load. Please try again.')
+        setHelcimListening(false)
       }
     }
     const existing = document.getElementById('helcim-pay-js')
     if (!existing) {
+      console.log('[AddCard] loading helcim-pay-js script')
       const script = document.createElement('script')
-      script.id  = 'helcim-pay-js'
-      script.src = 'https://secure.myhelcim.com/js/version2.js'
+      script.id     = 'helcim-pay-js'
+      script.src    = 'https://secure.myhelcim.com/js/version2.js'
       script.onload = launch
+      script.onerror = () => {
+        console.error('[AddCard] failed to load helcim-pay-js script')
+        toast.error('Card entry script failed to load.')
+        setHelcimListening(false)
+      }
       document.body.appendChild(script)
     } else {
+      console.log('[AddCard] helcim-pay-js already loaded, launching directly')
       launch()
     }
   }

@@ -66,11 +66,35 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ received: true })
       }
 
-      const { data: payment } = await service
+      let { data: payment } = await service
         .from('payments')
         .select('id, order_id, tenant_id, status')
         .eq('helcim_transaction_id', invoiceNumber)
         .maybeSingle()
+
+      // Fallback: if confirmTerminalPayment already ran, helcim_transaction_id was
+      // overwritten with the real Helcim txn ID. Reconstruct the order UUID from the
+      // invoiceNumber (which is order_id with dashes stripped) and look up that way.
+      if (!payment && /^[0-9a-f]{32}$/i.test(invoiceNumber)) {
+        const orderId = [
+          invoiceNumber.slice(0, 8),
+          invoiceNumber.slice(8, 12),
+          invoiceNumber.slice(12, 16),
+          invoiceNumber.slice(16, 20),
+          invoiceNumber.slice(20),
+        ].join('-')
+
+        const { data: paymentByOrder } = await service
+          .from('payments')
+          .select('id, order_id, tenant_id, status')
+          .eq('order_id', orderId)
+          .eq('method', 'card_present')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        payment = paymentByOrder
+      }
 
       if (!payment) {
         console.warn('[helcim webhook] No payment found for invoiceNumber', invoiceNumber)
@@ -128,11 +152,31 @@ export async function POST(req: NextRequest) {
     const invoiceNumber = event.data.invoiceNumber as string | undefined
 
     if (invoiceNumber) {
-      const { data: payment } = await service
+      let { data: payment } = await service
         .from('payments')
         .select('id, status')
         .eq('helcim_transaction_id', invoiceNumber)
         .maybeSingle()
+
+      // Fallback: look up by reconstructed order_id UUID
+      if (!payment && /^[0-9a-f]{32}$/i.test(invoiceNumber)) {
+        const orderId = [
+          invoiceNumber.slice(0, 8),
+          invoiceNumber.slice(8, 12),
+          invoiceNumber.slice(12, 16),
+          invoiceNumber.slice(16, 20),
+          invoiceNumber.slice(20),
+        ].join('-')
+        const { data: paymentByOrder } = await service
+          .from('payments')
+          .select('id, status')
+          .eq('order_id', orderId)
+          .eq('method', 'card_present')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        payment = paymentByOrder
+      }
 
       if (payment?.status === 'pending') {
         await service

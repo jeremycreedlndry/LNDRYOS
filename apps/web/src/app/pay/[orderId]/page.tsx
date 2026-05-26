@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { CheckCircle, AlertCircle, Shirt, CreditCard } from 'lucide-react'
 
@@ -60,7 +60,8 @@ function useHelcimScript() {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function PayPage() {
+// useSearchParams() requires a Suspense boundary in Next.js App Router
+function PayPageInner() {
   const { orderId }    = useParams<{ orderId: string }>()
   const searchParams   = useSearchParams()
   const token          = searchParams.get('t') ?? ''
@@ -358,5 +359,17 @@ export default function PayPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function PayPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-sm text-gray-400">Loading…</p>
+      </div>
+    }>
+      <PayPageInner />
+    </Suspense>
   )
 }

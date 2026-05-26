@@ -30,7 +30,8 @@ export async function POST(req: NextRequest) {
   const { order_id, payment_token, tip_cents } = await req.json()
 
   if (!order_id || !payment_token) {
-    return NextResponse.json({ error: 'Missing params' }, { status: 400 })
+    console.error('[helcim-init] Missing params:', { order_id: order_id ?? '(null)', payment_token: payment_token ? `${String(payment_token).slice(0,8)}…` : '(null)' })
+    return NextResponse.json({ error: `Missing params: order_id=${!!order_id} payment_token=${!!payment_token}` }, { status: 400 })
   }
 
   const supabase = createSupabaseServiceClient(

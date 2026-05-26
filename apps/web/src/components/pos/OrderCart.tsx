@@ -65,6 +65,17 @@ export function OrderCart({
 
   const utils = trpc.useUtils()
 
+  // Load available codes when the promo panel opens
+  const { data: availableCodes = [] } = trpc.promoCodes.list.useQuery(undefined, {
+    enabled: showPromo,
+    select: (codes) => codes.filter((c) => {
+      if (!c.is_active) return false
+      if (c.expires_at && new Date(c.expires_at) < new Date()) return false
+      if (c.max_uses != null && c.use_count >= c.max_uses) return false
+      return true
+    }),
+  })
+
   const manualDiscountCents = (() => {
     if (promoApplied) return promoApplied.discount_cents
     if (manualPct)  return Math.min(Math.round(subtotal * parseFloat(manualPct) / 100), subtotal)
@@ -121,6 +132,38 @@ export function OrderCart({
     setPromoApplied(null)
     setPromoInput('')
     setPromoError('')
+  }
+
+  const handleSelectCode = async (code: string) => {
+    setPromoInput(code)
+    setPromoError('')
+    setPromoLoading(true)
+    try {
+      const result = await utils.promoCodes.validate.fetch({
+        code,
+        customer_id: customerId ?? null,
+        order_total: subtotal + tax,
+      })
+      if (!result.valid) {
+        setPromoError(result.reason)
+      } else {
+        setPromoApplied({ promo_code_id: result.promo_code_id, discount_cents: result.discount_cents, code })
+        setShowPromo(false)
+        setPromoInput('')
+        setPromoError('')
+        setManualPct('')
+        setManualFlat('')
+      }
+    } catch {
+      setPromoError('Failed to validate code')
+    } finally {
+      setPromoLoading(false)
+    }
+  }
+
+  const formatCodeDiscount = (code: { discount_type: string; discount_value: number }) => {
+    if (code.discount_type === 'percent') return `${code.discount_value}% off`
+    return `${formatCurrency(code.discount_value)} off`
   }
 
   if (lines.length === 0) {
@@ -238,17 +281,42 @@ export function OrderCart({
             )}
           </div>
 
-          {/* Inline promo code input */}
+          {/* Promo panel */}
           {showPromo && !promoApplied && (
-            <div className="space-y-1">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-2 space-y-2">
+              {/* Available codes */}
+              {availableCodes.length > 0 && (
+                <div className="space-y-1">
+                  {availableCodes.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => handleSelectCode(c.code)}
+                      disabled={promoLoading}
+                      className="w-full flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-left hover:border-brand-400 hover:bg-brand-50 transition-colors disabled:opacity-50"
+                    >
+                      <div className="min-w-0">
+                        <span className="font-mono text-sm font-semibold text-gray-900">{c.code}</span>
+                        {c.description && (
+                          <span className="ml-2 text-xs text-gray-400 truncate">{c.description}</span>
+                        )}
+                      </div>
+                      <span className="ml-2 shrink-0 text-xs font-semibold text-brand-700 bg-brand-50 border border-brand-100 rounded-full px-2 py-0.5">
+                        {formatCodeDiscount(c)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Manual entry */}
               <div className="flex items-center gap-1.5">
                 <input
                   value={promoInput}
                   onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setPromoError('') }}
                   onKeyDown={(e) => e.key === 'Enter' && handleApplyPromo()}
-                  placeholder="Enter promo code"
-                  className="flex-1 rounded-md border border-gray-300 px-2 py-1 font-mono text-sm uppercase focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  autoFocus
+                  placeholder={availableCodes.length > 0 ? 'Or enter code manually…' : 'Enter promo code'}
+                  className="flex-1 rounded-md border border-gray-300 bg-white px-2 py-1 font-mono text-sm uppercase focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  autoFocus={availableCodes.length === 0}
                 />
                 <Button
                   size="sm" onClick={handleApplyPromo}

@@ -240,12 +240,77 @@ function LookupResultCard({ result, onLinked }: {
   )
 }
 
+// ─── Customer cards panel ─────────────────────────────────────────────────────
+
+function CustomerCardsPanel({ customerId, customerName, onClose, onCardClick }: {
+  customerId: string
+  customerName: string
+  onClose: () => void
+  onCardClick: (cardNumber: string) => void
+}) {
+  const { data: cards, isLoading } = trpc.prepaidCards.listForCustomer.useQuery({ customer_id: customerId })
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <User className="h-4 w-4 text-gray-500" />
+          <span className="text-sm font-semibold text-gray-900">{customerName}</span>
+        </div>
+        <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {isLoading && (
+        <div className="px-5 py-6 text-center text-sm text-gray-400">Loading…</div>
+      )}
+
+      {!isLoading && (!cards || cards.length === 0) && (
+        <div className="px-5 py-6 text-center text-sm text-gray-400">
+          No gift cards linked to this customer.
+        </div>
+      )}
+
+      {cards && cards.length > 0 && (
+        <div className="divide-y divide-gray-50">
+          {cards.map(card => (
+            <button
+              key={card.id}
+              type="button"
+              onClick={() => onCardClick(card.card_display_number)}
+              className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50 text-left"
+            >
+              <div className="flex items-center gap-3">
+                <CreditCard className="h-4 w-4 text-gray-400 shrink-0" />
+                <span className="font-mono font-medium text-gray-900 text-sm">{card.card_display_number}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-gray-900 text-sm">{formatCurrency(card.balance_cents)}</span>
+                {statusPill(card.status ?? 'active')}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+type SearchMode = 'card' | 'customer'
+
 export default function GiftCardsPage() {
-  const [cardNumber, setCardNumber]   = useState('')
-  const [lookupKey,  setLookupKey]    = useState<string | null>(null)
+  const [searchMode,   setSearchMode]   = useState<SearchMode>('card')
+
+  // Card number lookup
+  const [cardNumber,   setCardNumber]   = useState('')
+  const [lookupKey,    setLookupKey]    = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Customer lookup
+  const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; name: string } | null>(null)
 
   const { data: lookupResult, isFetching: lookingUp } = trpc.prepaidCards.lookup.useQuery(
     { display_number: lookupKey ?? '' },
@@ -267,6 +332,21 @@ export default function GiftCardsPage() {
     setTimeout(() => inputRef.current?.focus(), 100)
   }
 
+  function handleCardFromCustomer(cardNum: string) {
+    // Switch to card mode and pull up that specific card
+    setSearchMode('card')
+    setCardNumber(cardNum)
+    setLookupKey(cardNum)
+    setSelectedCustomer(null)
+  }
+
+  function switchMode(mode: SearchMode) {
+    setSearchMode(mode)
+    setLookupKey(null)
+    setCardNumber('')
+    setSelectedCustomer(null)
+  }
+
   return (
     <div className="flex flex-col gap-6 p-6 max-w-4xl mx-auto">
       {/* Header */}
@@ -277,31 +357,82 @@ export default function GiftCardsPage() {
 
       {/* Lookup */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-gray-700">Balance Check</h2>
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              ref={inputRef}
-              value={cardNumber}
-              onChange={e => { setCardNumber(e.target.value); setLookupKey(null) }}
-              onKeyDown={e => e.key === 'Enter' && handleLookup()}
-              placeholder="Enter card display number…"
-              className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-700">Balance Check</h2>
+          {/* Mode toggle */}
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => switchMode('card')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${
+                searchMode === 'card'
+                  ? 'bg-gray-900 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <CreditCard className="h-3.5 w-3.5" />
+              Card #
+            </button>
+            <button
+              type="button"
+              onClick={() => switchMode('customer')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${
+                searchMode === 'customer'
+                  ? 'bg-gray-900 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <User className="h-3.5 w-3.5" />
+              Customer
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleLookup}
-            disabled={!cardNumber.trim() || lookingUp}
-            className="rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
-          >
-            {lookingUp ? 'Looking up…' : 'Look Up'}
-          </button>
         </div>
 
-        {lookupResult && (
-          <LookupResultCard result={lookupResult} onLinked={handleLinked} />
+        {/* Card number search */}
+        {searchMode === 'card' && (
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  ref={inputRef}
+                  value={cardNumber}
+                  onChange={e => { setCardNumber(e.target.value); setLookupKey(null) }}
+                  onKeyDown={e => e.key === 'Enter' && handleLookup()}
+                  placeholder="Enter card display number…"
+                  className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleLookup}
+                disabled={!cardNumber.trim() || lookingUp}
+                className="rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+              >
+                {lookingUp ? 'Looking up…' : 'Look Up'}
+              </button>
+            </div>
+
+            {lookupResult && (
+              <LookupResultCard result={lookupResult} onLinked={handleLinked} />
+            )}
+          </div>
+        )}
+
+        {/* Customer name search */}
+        {searchMode === 'customer' && (
+          <div className="space-y-4">
+            {!selectedCustomer ? (
+              <CustomerPicker onSelect={(id, name) => setSelectedCustomer({ id, name })} />
+            ) : (
+              <CustomerCardsPanel
+                customerId={selectedCustomer.id}
+                customerName={selectedCustomer.name}
+                onClose={() => setSelectedCustomer(null)}
+                onCardClick={handleCardFromCustomer}
+              />
+            )}
+          </div>
         )}
       </div>
 
@@ -330,7 +461,7 @@ export default function GiftCardsPage() {
                   <tr
                     key={card.id}
                     className="hover:bg-gray-50 cursor-pointer"
-                    onClick={() => { setCardNumber(card.card_display_number); setLookupKey(card.card_display_number) }}
+                    onClick={() => { setSearchMode('card'); setCardNumber(card.card_display_number); setLookupKey(card.card_display_number) }}
                   >
                     <td className="px-5 py-3 font-mono font-medium text-gray-900">{card.card_display_number}</td>
                     <td className="px-5 py-3 font-semibold text-gray-900">{formatCurrency(card.balance_cents)}</td>

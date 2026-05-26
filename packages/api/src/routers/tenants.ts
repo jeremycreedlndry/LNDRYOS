@@ -69,6 +69,21 @@ export const tenantsRouter = router({
           fabric_softener: z.array(z.string()).optional(),
           wash_temperature: z.array(z.string()).optional(),
         }).optional(),
+        helcim: z.object({
+          terminal_id: z.string().optional(),
+        }).optional(),
+        hardware: z.object({
+          receipt_printer: z.object({
+            name: z.string().optional(),
+            connection: z.enum(['network', 'usb', 'bluetooth']).optional(),
+            address: z.string().optional(),
+          }).optional(),
+          label_printer: z.object({
+            name: z.string().optional(),
+            connection: z.enum(['network', 'usb', 'bluetooth']).optional(),
+            address: z.string().optional(),
+          }).optional(),
+        }).optional(),
       }).optional(),
     }))
     .mutation(async ({ ctx, input }) => {

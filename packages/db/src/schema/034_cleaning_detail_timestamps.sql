@@ -1,4 +1,6 @@
 -- ── Add detail_at and cleaning_at timestamps to orders ───────────────────────
+-- "Detail" in the UI = status 'pending' in the DB (pickup/delivery orders waiting to be processed)
+-- "Cleaning" = status 'cleaning'
 
 ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS detail_at   timestamptz,
@@ -9,11 +11,6 @@ ALTER TABLE orders
 CREATE OR REPLACE FUNCTION stamp_order_status_times()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-  -- Stamp detail_at the first time status becomes 'detail'
-  IF NEW.status = 'detail' AND OLD.status <> 'detail' AND NEW.detail_at IS NULL THEN
-    NEW.detail_at := now();
-  END IF;
-
   -- Stamp cleaning_at the first time status becomes 'cleaning'
   IF NEW.status = 'cleaning' AND OLD.status <> 'cleaning' AND NEW.cleaning_at IS NULL THEN
     NEW.cleaning_at := now();
@@ -30,14 +27,13 @@ CREATE TRIGGER trg_stamp_order_status_times
 
 -- ── Backfill existing orders ──────────────────────────────────────────────────
 
--- Orders currently in 'detail': use created_at as best approximation
+-- detail_at: pickup/delivery orders start as 'pending' — use created_at
 UPDATE orders
 SET detail_at = created_at
-WHERE status = 'detail'
+WHERE status IN ('pending', 'in_progress', 'cleaning', 'ready', 'picked_up', 'delivered')
   AND detail_at IS NULL;
 
--- Orders in cleaning or beyond (cleaning/ready/picked_up/delivered):
--- they've been through cleaning — use created_at as best approximation
+-- cleaning_at: orders that have reached/passed cleaning — use created_at as approximation
 UPDATE orders
 SET cleaning_at = created_at
 WHERE status IN ('cleaning', 'ready', 'picked_up', 'delivered')

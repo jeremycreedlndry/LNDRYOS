@@ -660,6 +660,7 @@ async function sendOrderCreatedEmail(supabase: any, tenantId: string, order: any
       taxAmount: order.tax_amount,
       total: order.total_amount,
       notes: order.notes ?? null,
+      paymentLink: `${APP_URL}/pay/${order.id}?t=${order.payment_token}`,
     })
     await sendEmail({ to: customer.email, subject, html })
     await logMessage(supabase, { tenant_id: tenantId, customer_id: order.customer_id, direction: 'outbound', channel: 'email', body: `Order #${order.order_number} received — being cleaned now.`, subject, to_address: customer.email })

@@ -113,6 +113,7 @@ export interface OrderCreatedData {
   taxAmount: number
   total: number
   notes?: string | null
+  paymentLink?: string
 }
 
 export function orderCreatedEmail(d: OrderCreatedData): { subject: string; html: string } {
@@ -128,6 +129,11 @@ export function orderCreatedEmail(d: OrderCreatedData): { subject: string; html:
       </tbody>
     </table>
     ${d.notes ? `<p style="font-size:13px;color:#6b7280;background:#f9fafb;padding:12px;border-radius:8px;margin-top:8px">📝 ${d.notes}</p>` : ''}
+    ${d.paymentLink ? `
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:20px;margin:20px 0;text-align:center;">
+      <p style="margin:0 0 16px;font-size:13px;color:#3b82f6">Pay online anytime before pickup</p>
+      <a href="${d.paymentLink}" class="btn">Pay Now — ${fmt(d.total)}</a>
+    </div>` : ''}
     ${d.storePhone ? `<div class="divider"></div><p style="font-size:13px;color:#6b7280">Questions? Call us at ${d.storePhone}</p>` : ''}
   `
   return {

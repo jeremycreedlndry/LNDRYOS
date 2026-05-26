@@ -144,229 +144,40 @@ function ServiceModal({ initial, category, onClose, onSave, isSaving }: ServiceM
   )
 }
 
-// ─── Price list editor modal ──────────────────────────────────────────────────
+// ─── Price override row (non-default price list) ──────────────────────────────
 
-interface PriceListEditorProps {
-  priceListId: string
-  priceListName: string
-  isDefault: boolean
-  onClose: () => void
-}
-
-function PriceListEditor({ priceListId, priceListName, isDefault, onClose }: PriceListEditorProps) {
-  const utils = trpc.useUtils()
-  const { data: items = [] } = trpc.catalog.list.useQuery({ includeInactive: true })
-  const { data: priceMap = {} } = trpc.priceLists.getPrices.useQuery({ priceListId })
-  const [localPrices, setLocalPrices] = useState<Record<string, string>>({})
-  const [saving, setSaving] = useState<string | null>(null)
-
-  const setPrice = trpc.priceLists.setPrice.useMutation({
-    onSuccess: () => { utils.priceLists.getPrices.invalidate(); utils.catalog.list.invalidate() },
-    onError: (e) => toast.error(e.message),
-  })
-
-  const handleBlur = async (itemId: string, basePrice: number) => {
-    const raw = localPrices[itemId]
-    if (raw === undefined) return
-    const cents = Math.round(parseFloat(raw) * 100)
-    if (isNaN(cents) || cents < 0) { toast.error('Invalid price'); return }
-    setSaving(itemId)
-    await setPrice.mutateAsync({ priceListId, serviceItemId: itemId, unitPrice: cents })
-    setSaving(null)
-  }
-
-  const displayPrice = (item: { id: string; unit_price: number }) => {
-    if (localPrices[item.id] !== undefined) return localPrices[item.id]
-    const override = priceMap[item.id]
-    return ((override ?? item.unit_price) / 100).toFixed(2)
-  }
-
-  const categories: { value: ItemCategory; label: string }[] = [
-    { value: 'wash_fold', label: 'Wash & Fold' },
-    { value: 'gift_card', label: 'Gift Cards' },
-    { value: 'product',   label: 'Products' },
-  ]
+function PriceRow({ item, priceOverrides, onPriceChange, isSaving }: {
+  item: { id: string; name: string; unit_price: number; unit_label: string; is_active: boolean }
+  priceOverrides: Record<string, number>
+  onPriceChange: (itemId: string, dollars: string) => void
+  isSaving: boolean
+}) {
+  const [localValue, setLocalValue] = useState<string | undefined>(undefined)
+  const override = priceOverrides[item.id]
+  const displayVal = localValue ?? ((override ?? item.unit_price) / 100).toFixed(2)
+  const hasOverride = override !== undefined
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">{priceListName}</h2>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {isDefault ? 'Base prices for all customers' : 'Overrides base prices for assigned customers'}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
-        </div>
-
-        <div className="overflow-y-auto flex-1 p-6 space-y-6">
-          {categories.map(({ value, label }) => {
-            const catItems = items.filter((i) => i.category === value)
-            if (catItems.length === 0) return null
-            return (
-              <div key={value}>
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">{label}</h3>
-                <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
-                  {catItems.map((item) => (
-                    <div key={item.id} className="flex items-center gap-3 px-4 py-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900">{item.name}</p>
-                        {!isDefault && (
-                          <p className="text-xs text-gray-400">
-                            Base: {formatCurrency(item.unit_price)}{item.unit_label !== 'item' ? `/${item.unit_label}` : ''}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-sm text-gray-400">$</span>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          min="0"
-                          className="w-24 rounded-md border border-gray-300 px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-brand-500"
-                          value={displayPrice(item)}
-                          onChange={(e) => setLocalPrices((p) => ({ ...p, [item.id]: e.target.value }))}
-                          onBlur={() => handleBlur(item.id, item.unit_price)}
-                          disabled={saving === item.id}
-                        />
-                        <span className="text-xs text-gray-400 w-8">
-                          {item.unit_label !== 'item' ? `/${item.unit_label}` : ''}
-                        </span>
-                        {saving === item.id && <span className="text-xs text-gray-400">…</span>}
-                        {!isDefault && priceMap[item.id] !== undefined && saving !== item.id && (
-                          <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-
-        <div className="border-t border-gray-100 px-6 py-4">
-          <Button onClick={onClose} className="w-full">Done</Button>
-        </div>
+    <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100 last:border-0">
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm font-medium ${item.is_active ? 'text-gray-900' : 'text-gray-400'}`}>{item.name}</p>
+        <p className="text-xs text-gray-400">
+          Default: {formatCurrency(item.unit_price)}{item.unit_label !== 'item' ? `/${item.unit_label}` : ''}
+        </p>
       </div>
-    </div>
-  )
-}
-
-// ─── Price Lists section ──────────────────────────────────────────────────────
-
-function PriceListsSection() {
-  const utils = trpc.useUtils()
-  const { data: lists = [] } = trpc.priceLists.list.useQuery()
-  const [editing, setEditing] = useState<{ id: string; name: string; isDefault: boolean } | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [renameId, setRenameId] = useState<string | null>(null)
-  const [renameName, setRenameName] = useState('')
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
-
-  const createList = trpc.priceLists.create.useMutation({
-    onSuccess: () => { utils.priceLists.list.invalidate(); setAdding(false); setNewName('') },
-    onError: (e) => toast.error(e.message),
-  })
-  const renameList = trpc.priceLists.rename.useMutation({
-    onSuccess: () => { utils.priceLists.list.invalidate(); setRenameId(null) },
-    onError: (e) => toast.error(e.message),
-  })
-  const deleteList = trpc.priceLists.delete.useMutation({
-    onSuccess: () => { utils.priceLists.list.invalidate(); setDeleteConfirm(null) },
-    onError: (e) => toast.error(e.message),
-  })
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-700">Price Lists</h3>
-          <p className="text-xs text-gray-400">Assign customers to a list for custom pricing</p>
-        </div>
-        <button
-          onClick={() => setAdding(true)}
-          className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
-        >
-          <Plus className="h-3.5 w-3.5" /> New list
-        </button>
-      </div>
-
-      <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
-        {lists.map((list) => (
-          <div key={list.id} className="flex items-center gap-2 px-4 py-3">
-            {renameId === list.id ? (
-              <form
-                className="flex flex-1 items-center gap-2"
-                onSubmit={(e) => { e.preventDefault(); renameList.mutate({ id: list.id, name: renameName }) }}
-              >
-                <Input value={renameName} onChange={(e) => setRenameName(e.target.value)} autoFocus className="h-7 text-sm" />
-                <button type="submit" className="text-brand-600"><Check className="h-4 w-4" /></button>
-                <button type="button" onClick={() => setRenameId(null)} className="text-gray-400"><X className="h-4 w-4" /></button>
-              </form>
-            ) : (
-              <>
-                <div className="flex-1">
-                  <span className="text-sm font-medium text-gray-900">{list.name}</span>
-                  {list.is_default && <span className="ml-2 text-xs text-gray-400">default</span>}
-                </div>
-
-                <button
-                  onClick={() => setEditing({ id: list.id, name: list.name, isDefault: list.is_default })}
-                  className="text-xs font-medium text-brand-600 hover:text-brand-700"
-                >
-                  Edit prices
-                </button>
-
-                {!list.is_default && (
-                  <>
-                    <button
-                      onClick={() => { setRenameId(list.id); setRenameName(list.name) }}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-
-                    {deleteConfirm === list.id ? (
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => deleteList.mutate({ id: list.id })} className="text-red-500"><Check className="h-4 w-4" /></button>
-                        <button onClick={() => setDeleteConfirm(null)} className="text-gray-400"><X className="h-4 w-4" /></button>
-                      </div>
-                    ) : (
-                      <button onClick={() => setDeleteConfirm(list.id)} className="text-gray-300 hover:text-red-500">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        ))}
-
-        {adding && (
-          <form
-            className="flex items-center gap-2 px-4 py-3"
-            onSubmit={(e) => { e.preventDefault(); if (newName.trim()) createList.mutate({ name: newName.trim() }) }}
-          >
-            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="List name (e.g. Commercial)" autoFocus className="h-7 text-sm flex-1" />
-            <button type="submit" className="text-brand-600"><Check className="h-4 w-4" /></button>
-            <button type="button" onClick={() => { setAdding(false); setNewName('') }} className="text-gray-400"><X className="h-4 w-4" /></button>
-          </form>
-        )}
-      </div>
-
-      {editing && (
-        <PriceListEditor
-          priceListId={editing.id}
-          priceListName={editing.name}
-          isDefault={editing.isDefault}
-          onClose={() => setEditing(null)}
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm text-gray-400">$</span>
+        <input
+          type="number" inputMode="decimal" step="0.01" min="0"
+          className={`w-24 rounded-md border px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-brand-500 ${hasOverride ? 'border-brand-300 bg-brand-50 font-medium text-brand-700' : 'border-gray-300'}`}
+          value={displayVal}
+          onChange={(e) => setLocalValue(e.target.value)}
+          onBlur={(e) => { onPriceChange(item.id, e.target.value); setLocalValue(undefined) }}
+          disabled={isSaving}
         />
-      )}
+        <span className="text-xs text-gray-400 w-8">{item.unit_label !== 'item' ? `/${item.unit_label}` : ''}</span>
+        {isSaving ? <span className="text-xs text-gray-400">…</span> : hasOverride ? <Check className="h-3.5 w-3.5 text-brand-500 shrink-0" /> : <span className="w-3.5" />}
+      </div>
     </div>
   )
 }
@@ -473,7 +284,13 @@ function SortableServiceRow({
 
 // ─── Generic service section ──────────────────────────────────────────────────
 
-function ServiceSection({ category, label, description }: { category: ItemCategory; label: string; description: string }) {
+function ServiceSection({ category, label, description, isDefaultList, priceOverrides, onPriceChange, savingItemId }: {
+  category: ItemCategory; label: string; description: string
+  isDefaultList: boolean
+  priceOverrides: Record<string, number>
+  onPriceChange: (itemId: string, dollars: string) => void
+  savingItemId: string | null
+}) {
   const utils = trpc.useUtils()
   const [modal, setModal] = useState<ServiceFormData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
@@ -535,18 +352,24 @@ function ServiceSection({ category, label, description }: { category: ItemCatego
           <h3 className="text-sm font-semibold text-gray-700">{label}</h3>
           <p className="text-xs text-gray-400">{description}</p>
         </div>
-        <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] })}
-          className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700">
-          <Plus className="h-3.5 w-3.5" /> Add
-        </button>
+        {isDefaultList && (
+          <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] })}
+            className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700">
+            <Plus className="h-3.5 w-3.5" /> Add
+          </button>
+        )}
       </div>
 
       {orderedItems.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-400">
-          No {label.toLowerCase()} yet.{' '}
-          <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] })} className="text-brand-600 hover:underline">Add one</button>
-        </div>
-      ) : (
+        isDefaultList ? (
+          <div className="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-400">
+            No {label.toLowerCase()} yet.{' '}
+            <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] })} className="text-brand-600 hover:underline">Add one</button>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-400">No {label.toLowerCase()} items.</div>
+        )
+      ) : isDefaultList ? (
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={orderedIds} strategy={verticalListSortingStrategy}>
@@ -565,6 +388,18 @@ function ServiceSection({ category, label, description }: { category: ItemCatego
             </SortableContext>
           </DndContext>
         </div>
+      ) : (
+        <div className="rounded-xl border border-gray-200 overflow-hidden">
+          {orderedItems.map((item) => (
+            <PriceRow
+              key={item.id}
+              item={item}
+              priceOverrides={priceOverrides}
+              onPriceChange={onPriceChange}
+              isSaving={savingItemId === item.id}
+            />
+          ))}
+        </div>
       )}
 
       {modal !== null && (
@@ -577,20 +412,149 @@ function ServiceSection({ category, label, description }: { category: ItemCatego
 // ─── Services tab ─────────────────────────────────────────────────────────────
 
 function ServicesTab() {
+  const utils = trpc.useUtils()
+
+  // ── Price list state ────────────────────────────────────────────────────────
+  const { data: lists = [] } = trpc.priceLists.list.useQuery()
+  const defaultList = lists.find((l) => l.is_default)
+  const [selectedListId, setSelectedListId] = useState('')
+
+  useEffect(() => {
+    if (!selectedListId && defaultList) setSelectedListId(defaultList.id)
+  }, [defaultList?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectedList = lists.find((l) => l.id === selectedListId)
+  const isDefaultList = selectedList?.is_default ?? true
+
+  const { data: priceOverrides = {} } = trpc.priceLists.getPrices.useQuery(
+    { priceListId: selectedListId },
+    { enabled: !!selectedListId && !isDefaultList }
+  )
+
+  // ── Price list management ───────────────────────────────────────────────────
+  const [addingList, setAddingList] = useState(false)
+  const [newListName, setNewListName] = useState('')
+  const [renameListId, setRenameListId] = useState<string | null>(null)
+  const [renameListName, setRenameListName] = useState('')
+  const [deleteListConfirm, setDeleteListConfirm] = useState(false)
+
+  const createList = trpc.priceLists.create.useMutation({
+    onSuccess: (list) => {
+      utils.priceLists.list.invalidate()
+      setSelectedListId(list.id)
+      setAddingList(false)
+      setNewListName('')
+      toast.success('Price list created')
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const renameList = trpc.priceLists.rename.useMutation({
+    onSuccess: () => { utils.priceLists.list.invalidate(); setRenameListId(null) },
+    onError: (e) => toast.error(e.message),
+  })
+  const deleteList = trpc.priceLists.delete.useMutation({
+    onSuccess: () => {
+      utils.priceLists.list.invalidate()
+      setSelectedListId(defaultList?.id ?? '')
+      setDeleteListConfirm(false)
+      toast.success('Price list deleted')
+    },
+    onError: (e) => toast.error(e.message),
+  })
+
+  // ── Price override saving ───────────────────────────────────────────────────
+  const [savingItemId, setSavingItemId] = useState<string | null>(null)
+  const setPrice = trpc.priceLists.setPrice.useMutation({
+    onSuccess: () => { utils.priceLists.getPrices.invalidate({ priceListId: selectedListId }); setSavingItemId(null) },
+    onError: (e) => { toast.error(e.message); setSavingItemId(null) },
+  })
+  const handlePriceChange = (itemId: string, dollars: string) => {
+    const cents = Math.round(parseFloat(dollars) * 100)
+    if (isNaN(cents) || cents < 0) { toast.error('Invalid price'); return }
+    setSavingItemId(itemId)
+    setPrice.mutate({ priceListId: selectedListId, serviceItemId: itemId, unitPrice: cents })
+  }
+
+  const sectionProps = { isDefaultList, priceOverrides, onPriceChange: handlePriceChange, savingItemId }
+
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-base font-semibold text-gray-900">Services &amp; Products</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Manage what appears on the POS</p>
+
+      {/* Header + price list selector */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Services &amp; Products</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Manage what appears on the POS</p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {renameListId ? (
+            <form className="flex items-center gap-1.5"
+              onSubmit={(e) => { e.preventDefault(); renameList.mutate({ id: renameListId, name: renameListName }) }}>
+              <Input value={renameListName} onChange={(e) => setRenameListName(e.target.value)} autoFocus className="h-8 text-sm w-32" />
+              <button type="submit" className="text-brand-600"><Check className="h-4 w-4" /></button>
+              <button type="button" onClick={() => setRenameListId(null)} className="text-gray-400"><X className="h-4 w-4" /></button>
+            </form>
+          ) : addingList ? (
+            <form className="flex items-center gap-1.5"
+              onSubmit={(e) => { e.preventDefault(); if (newListName.trim()) createList.mutate({ name: newListName.trim() }) }}>
+              <Input value={newListName} onChange={(e) => setNewListName(e.target.value)} placeholder="List name…" autoFocus className="h-8 text-sm w-36" />
+              <button type="submit" className="text-brand-600"><Check className="h-4 w-4" /></button>
+              <button type="button" onClick={() => { setAddingList(false); setNewListName('') }} className="text-gray-400"><X className="h-4 w-4" /></button>
+            </form>
+          ) : (
+            <>
+              <select
+                value={selectedListId}
+                onChange={(e) => { setSelectedListId(e.target.value); setDeleteListConfirm(false) }}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              >
+                {lists.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}{l.is_default ? ' (default)' : ''}</option>
+                ))}
+              </select>
+
+              {!isDefaultList && (
+                <>
+                  <button onClick={() => { setRenameListId(selectedListId); setRenameListName(selectedList?.name ?? '') }}
+                    title="Rename list" className="text-gray-400 hover:text-gray-600">
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  {deleteListConfirm ? (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => deleteList.mutate({ id: selectedListId })} className="text-red-500" title="Confirm delete"><Check className="h-4 w-4" /></button>
+                      <button onClick={() => setDeleteListConfirm(false)} className="text-gray-400"><X className="h-4 w-4" /></button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setDeleteListConfirm(true)} className="text-gray-300 hover:text-red-500" title="Delete list">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </>
+              )}
+
+              <button onClick={() => setAddingList(true)}
+                className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">
+                <Plus className="h-3.5 w-3.5" /> New list
+              </button>
+            </>
+          )}
+        </div>
       </div>
-      <ServiceSection category="wash_fold"   label="Wash & Fold"   description="Laundry priced by weight or bag" />
-      <ServiceSection category="upcharge"    label="Upcharges"     description="Add-ons shown during bag entry (e.g. Stain Remover, Sanitize)" />
-      <ServiceSection category="dry_clean"   label="Dry Cleaning"  description="Dry clean items priced per piece" />
-      <ServiceSection category="press_only"  label="Press Only"    description="Pressing and steaming services" />
-      <ServiceSection category="alterations" label="Alterations"   description="Tailoring and repair services" />
+
+      {!isDefaultList && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+          Editing price overrides for <strong>{selectedList?.name}</strong>. Highlighted prices differ from the default. Leave a field unchanged to use the default price.
+        </div>
+      )}
+
+      <ServiceSection category="wash_fold"   label="Wash & Fold"   description="Laundry priced by weight or bag" {...sectionProps} />
+      <ServiceSection category="upcharge"    label="Upcharges"     description="Add-ons shown during bag entry (e.g. Stain Remover, Sanitize)" {...sectionProps} />
+      <ServiceSection category="dry_clean"   label="Dry Cleaning"  description="Dry clean items priced per piece" {...sectionProps} />
+      <ServiceSection category="press_only"  label="Press Only"    description="Pressing and steaming services" {...sectionProps} />
+      <ServiceSection category="alterations" label="Alterations"   description="Tailoring and repair services" {...sectionProps} />
       <GiftCardsSection />
-      <ServiceSection category="product"     label="Products"      description="Detergent, bags, accessories" />
-      <PriceListsSection />
+      <ServiceSection category="product"     label="Products"      description="Detergent, bags, accessories" {...sectionProps} />
     </div>
   )
 }

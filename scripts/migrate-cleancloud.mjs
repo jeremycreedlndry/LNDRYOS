@@ -23,9 +23,11 @@ import { createClient } from '@supabase/supabase-js'
 const CC_API_TOKEN = process.env.CC_API_TOKEN
 const CC_BASE_URL  = 'https://cleancloudapp.com/api'
 
-const SUPABASE_URL = 'https://uwugotsowhnnygtaeaqb.supabase.co'
-const SERVICE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3dWdvdHNvd2hubnlndGFlYXFiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzg2NjM2NCwiZXhwIjoyMDkzNDQyMzY0fQ.QXTpcfw4SfBzGFYvJbuUIZqiYjYYXgB9gy7MEEDpGCs'
-const TENANT_ID    = 'b6b27886-565a-425e-93ce-c0e165aa8ac6'
+const SUPABASE_URL = 'https://xcmldvthynocxnkehpdc.supabase.co'
+const SERVICE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhjbWxkdnRoeW5vY3hua2VocGRjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODY5MDc0NCwiZXhwIjoyMDk0MjY2NzQ0fQ.CEH9TZUqDYlAw-7uF7glpBFqYVYWGG4VmJF20Bj9ti8'
+const TENANT_ID    = 'f91d69a7-ddf8-4ed4-b1c3-555fd3004d0f'
+// System user UUID — used as created_by for migrated orders (The LNDRY Co. admin)
+const SYSTEM_USER  = 'a80e990f-3b54-495f-863e-100287cb5291'
 
 const DRY_RUN        = process.argv.includes('--dry-run')
 const CUSTOMERS_ONLY = process.argv.includes('--customers-only')
@@ -85,7 +87,8 @@ function mapStatus(cc) {
 
 // CC payment type: 0=None/Invoice, 1=Cash, 2=Card, 3=Check
 function mapPaymentMethod(cc) {
-  return { 1: 'cash', 2: 'card_present', 3: 'check' }[Number(cc)] ?? 'cash'
+  return { 1: 'cash', 2: 'card_present', 3: 'cash' }[Number(cc)] ?? 'cash'
+  // Note: CC type 3 = cheque — mapped to 'cash' since there's no cheque enum value
 }
 
 function guessCategory(name = '') {
@@ -139,6 +142,7 @@ function buildOrderLines(order) {
       category:   guessCategory(name),
       quantity:   1,
       unit_price: subCts,
+      line_total: subCts,
       unit_label: 'item',
       notes:      null,
     }]
@@ -153,11 +157,13 @@ function buildOrderLines(order) {
     const allocated  = isLast
       ? subCts - items.slice(0, -1).reduce((s, it, i) => s + Math.round(subCts * (totalQty > 0 ? it.qty / totalQty : 1 / items.length)), 0)
       : Math.round(subCts * proportion)
+    const unitPrice  = item.qty > 0 ? Math.round(allocated / item.qty) : allocated
     return {
       name:       item.name,
       category:   guessCategory(item.name),
       quantity:   item.qty,
-      unit_price: item.qty > 0 ? Math.round(allocated / item.qty) : allocated,
+      unit_price: unitPrice,
+      line_total: allocated,
       unit_label: item.name.toLowerCase().includes('wash') || item.name.toLowerCase().includes('fold') ? 'lb' : 'item',
       notes:      null,
     }
@@ -359,7 +365,7 @@ async function migrateOrders(ccOrders, customerIdMap) {
       const subtotalCents = Math.max(0, totalCents - taxCents)
       const taxRate       = subtotalCents > 0 ? taxCents / subtotalCents : 0
       const status        = mapStatus(o.status)
-      const payStatus     = o.paid == 1 ? 'paid' : 'unpaid'
+      const payStatus     = o.paid == 1 ? 'paid' : 'pending'
 
       const createdAt  = unixToISO(o.createdDate)   ?? new Date().toISOString()
       const readyAt    = unixToISO(o.cleanedDate)
@@ -378,12 +384,12 @@ async function migrateOrders(ccOrders, customerIdMap) {
           tenant_id:      TENANT_ID,
           customer_id:    customerId,
           order_number:   orderNum,
+          created_by:     SYSTEM_USER,
           status,
           payment_status: payStatus,
           total_amount:   totalCents,
           subtotal:       subtotalCents,
           tax_amount:     taxCents,
-          tax_rate:       taxRate,
           discount_amount: discountCents,
           notes:          o.notes || null,
           created_at:     createdAt,
@@ -397,18 +403,18 @@ async function migrateOrders(ccOrders, customerIdMap) {
 
       if (lines.length > 0) {
         const { error: lErr } = await sb.from('order_lines')
-          .insert(lines.map(l => ({ ...l, order_id: order.id })))
+          .insert(lines.map(l => ({ ...l, order_id: order.id, tenant_id: TENANT_ID })))
         if (lErr) warn(`  WARN lines for CC-${o.id}: ${lErr.message}`)
       }
 
       if (o.paid == 1 && Number(o.paymentType) > 0) {
         const { error: pErr } = await sb.from('payments').insert({
-          order_id:       order.id,
-          tenant_id:      TENANT_ID,
-          amount:         totalCents,
-          method:         mapPaymentMethod(o.paymentType),
-          payment_status: 'completed',
-          processed_at:   unixToISO(o.paymentTime) ?? createdAt,
+          order_id:     order.id,
+          tenant_id:    TENANT_ID,
+          amount:       totalCents,
+          method:       mapPaymentMethod(o.paymentType),
+          status:       'paid',
+          processed_at: unixToISO(o.paymentTime) ?? createdAt,
         })
         if (pErr) warn(`  WARN payment for CC-${o.id}: ${pErr.message}`)
       }

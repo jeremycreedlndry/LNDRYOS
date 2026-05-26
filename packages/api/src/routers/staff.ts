@@ -27,23 +27,28 @@ export const staffRouter = router({
     .input(z.object({
       display_name:      z.string().min(1),
       email:             z.string().email(),
+      password:          z.string().min(8),
       phone:             z.string().optional(),
       role:              z.enum(['owner', 'manager', 'staff']).default('staff'),
       hourly_rate_cents: z.number().int().nonnegative().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Try to invite — if user already exists in Auth, look them up instead
+      // Create the auth user with email + password directly (no invite email)
       let userId: string
-      const { data: authData, error: inviteError } = await ctx.supabase.auth.admin.inviteUserByEmail(
-        input.email,
-        { data: { display_name: input.display_name } }
-      )
+      const { data: authData, error: createError } = await ctx.supabase.auth.admin.createUser({
+        email:          input.email,
+        password:       input.password,
+        email_confirm:  true,
+        user_metadata:  { display_name: input.display_name },
+      })
 
-      if (inviteError) {
-        // Might already exist — try to find by email
+      if (createError) {
+        // Already exists — look up by email and reuse
         const { data: existingList } = await ctx.supabase.auth.admin.listUsers()
         const existing = existingList?.users?.find((u) => u.email === input.email)
-        if (!existing) throw new TRPCError({ code: 'BAD_REQUEST', message: inviteError.message })
+        if (!existing) throw new TRPCError({ code: 'BAD_REQUEST', message: createError.message })
+        // Update their password to the new one
+        await ctx.supabase.auth.admin.updateUserById(existing.id, { password: input.password })
         userId = existing.id
       } else {
         userId = authData.user.id

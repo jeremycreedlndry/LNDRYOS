@@ -29,34 +29,39 @@ const ROLE_LABELS: Record<StaffRole, string> = {
 
 // ─── Invite modal ─────────────────────────────────────────────────────────────
 
-interface InviteForm {
+interface CreateForm {
   display_name: string
   email: string
+  password: string
+  password_confirm: string
   phone: string
   role: StaffRole
   hourly_rate: string
 }
 
-function InviteModal({ onClose }: { onClose: () => void }) {
+function CreateStaffModal({ onClose }: { onClose: () => void }) {
   const utils = trpc.useUtils()
-  const [form, setForm] = useState<InviteForm>({
-    display_name: '', email: '', phone: '', role: 'staff', hourly_rate: '',
+  const [form, setForm] = useState<CreateForm>({
+    display_name: '', email: '', password: '', password_confirm: '', phone: '', role: 'staff', hourly_rate: '',
   })
-  const set = (k: keyof InviteForm, v: string) => setForm((f) => ({ ...f, [k]: v }))
+  const set = (k: keyof CreateForm, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
-  const invite = trpc.staff.invite.useMutation({
-    onSuccess: () => { utils.staff.list.invalidate(); toast.success('Invite sent'); onClose() },
+  const create = trpc.staff.invite.useMutation({
+    onSuccess: () => { utils.staff.list.invalidate(); toast.success('Staff member created'); onClose() },
     onError: (e) => toast.error(e.message),
   })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (form.password.length < 8) { toast.error('Password must be at least 8 characters'); return }
+    if (form.password !== form.password_confirm) { toast.error('Passwords do not match'); return }
     const hourly_rate_cents = form.hourly_rate ? Math.round(parseFloat(form.hourly_rate) * 100) : undefined
-    invite.mutate({
+    create.mutate({
       display_name: form.display_name.trim(),
-      email: form.email.trim(),
-      phone: form.phone.trim() || undefined,
-      role: form.role,
+      email:        form.email.trim(),
+      password:     form.password,
+      phone:        form.phone.trim() || undefined,
+      role:         form.role,
       hourly_rate_cents,
     })
   }
@@ -65,7 +70,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <h2 className="text-base font-semibold text-gray-900">Invite staff member</h2>
+          <h2 className="text-base font-semibold text-gray-900">Create staff member</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4 p-6">
@@ -78,6 +83,18 @@ function InviteModal({ onClose }: { onClose: () => void }) {
             <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
             <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)}
               placeholder="jane@example.com" required />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <Input type="password" value={form.password} onChange={(e) => set('password', e.target.value)}
+                placeholder="Min 8 characters" required />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm</label>
+              <Input type="password" value={form.password_confirm} onChange={(e) => set('password_confirm', e.target.value)}
+                placeholder="Repeat password" required />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -105,11 +122,10 @@ function InviteModal({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           </div>
-          <p className="text-xs text-gray-400">An invitation email will be sent so they can set their password.</p>
           <div className="flex gap-2 pt-1">
             <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
-            <Button type="submit" disabled={invite.isPending} className="flex-1">
-              {invite.isPending ? 'Sending…' : 'Send invite'}
+            <Button type="submit" disabled={create.isPending} className="flex-1">
+              {create.isPending ? 'Creating…' : 'Create'}
             </Button>
           </div>
         </form>
@@ -528,7 +544,7 @@ export function StaffTab() {
           <p className="text-sm text-gray-500 mt-0.5">Manage team members, roles, and permissions</p>
         </div>
         <Button onClick={() => setShowInvite(true)} size="sm" className="gap-1.5">
-          <Plus className="h-4 w-4" /> Invite
+          <Plus className="h-4 w-4" /> Create
         </Button>
       </div>
 
@@ -536,7 +552,7 @@ export function StaffTab() {
         <p className="text-sm text-gray-400">Loading…</p>
       ) : members.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-200 px-4 py-6 text-center">
-          <p className="text-sm text-gray-400">No staff yet. <button onClick={() => setShowInvite(true)} className="text-brand-600 hover:underline">Invite someone</button></p>
+          <p className="text-sm text-gray-400">No staff yet. <button onClick={() => setShowInvite(true)} className="text-brand-600 hover:underline">Add someone</button></p>
         </div>
       ) : (
         <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -596,7 +612,7 @@ export function StaffTab() {
         </div>
       )}
 
-      {showInvite   && <InviteModal onClose={() => setShowInvite(false)} />}
+      {showInvite   && <CreateStaffModal onClose={() => setShowInvite(false)} />}
       {editingPerms && <PermissionsModal member={editingPerms} onClose={() => setEditingPerms(null)} />}
       {editingMember && <EditModal member={editingMember} onClose={() => setEditingMember(null)} />}
       {viewingTime  && <TimeEntriesModal member={viewingTime} onClose={() => setViewingTime(null)} />}

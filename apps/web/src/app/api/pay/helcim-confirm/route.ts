@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
     amount:                paidCents,
     method:                'card_online',
     status:                'paid',
-    processed_by:          'customer',
+    processed_by:          null,
     helcim_transaction_id: transaction_id ? String(transaction_id) : null,
     card_last4:            card_last4 ?? null,
     card_brand:            card_brand ?? null,

@@ -103,6 +103,28 @@ export const staffRouter = router({
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
     }),
 
+  setPassword: tenantProcedure
+    .input(z.object({
+      id:       z.string().uuid(),   // tenant_members.id
+      password: z.string().min(8),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Look up the user_id for this member
+      const { data: member } = await ctx.supabase
+        .from('tenant_members')
+        .select('user_id')
+        .eq('id', input.id)
+        .eq('tenant_id', ctx.tenantId)
+        .single()
+      if (!member) throw new TRPCError({ code: 'NOT_FOUND', message: 'Staff member not found' })
+
+      const { error } = await ctx.supabase.auth.admin.updateUserById(member.user_id, {
+        password: input.password,
+      })
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return { ok: true }
+    }),
+
   myRole: tenantProcedure.query(async ({ ctx }) => {
     const { data } = await ctx.supabase
       .from('tenant_members')

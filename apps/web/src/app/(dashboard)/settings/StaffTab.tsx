@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, X, Check, Trash2, Pencil, ToggleLeft, ToggleRight, Clock, WashingMachine, Wind, Search } from 'lucide-react'
+import { Plus, X, Check, Trash2, Pencil, ToggleLeft, ToggleRight, Clock, WashingMachine, Wind, Search, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { trpc } from '@/lib/trpc'
@@ -261,10 +261,18 @@ function EditModal({
   })
   const [cardDraft, setCardDraft] = useState(member.nayax_card_id ?? '')
   const [cardEditing, setCardEditing] = useState(false)
+  const [pwOpen, setPwOpen] = useState(false)
+  const [pw, setPw] = useState('')
+  const [pwConfirm, setPwConfirm] = useState('')
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   const update = trpc.staff.update.useMutation({
     onSuccess: () => { utils.staff.list.invalidate(); toast.success('Saved'); onClose() },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const setPassword = trpc.staff.setPassword.useMutation({
+    onSuccess: () => { toast.success('Password updated'); setPwOpen(false); setPw(''); setPwConfirm('') },
     onError: (e) => toast.error(e.message),
   })
 
@@ -352,6 +360,65 @@ function EditModal({
                 className="w-full text-left rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-600 hover:border-gray-300">
                 {member.nayax_card_id ?? <span className="text-gray-300 not-italic font-sans">Click to set…</span>}
               </button>
+            )}
+          </div>
+
+          {/* Set password */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-medium text-gray-700">Password</label>
+              <button
+                type="button"
+                onClick={() => { setPwOpen((o) => !o); setPw(''); setPwConfirm('') }}
+                className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                {pwOpen ? 'Cancel' : 'Set password'}
+              </button>
+            </div>
+            {pwOpen && (
+              <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">New password</label>
+                  <Input
+                    type="password"
+                    value={pw}
+                    onChange={(e) => setPw(e.target.value)}
+                    placeholder="Min 8 characters"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Confirm password</label>
+                  <Input
+                    type="password"
+                    value={pwConfirm}
+                    onChange={(e) => setPwConfirm(e.target.value)}
+                    placeholder="Repeat password"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (pw.length < 8) { toast.error('Password must be at least 8 characters'); return }
+                        if (pw !== pwConfirm) { toast.error('Passwords do not match'); return }
+                        setPassword.mutate({ id: member.id, password: pw })
+                      }
+                    }}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full"
+                  disabled={setPassword.isPending || pw.length < 8 || pw !== pwConfirm}
+                  onClick={() => {
+                    if (pw.length < 8) { toast.error('Password must be at least 8 characters'); return }
+                    if (pw !== pwConfirm) { toast.error('Passwords do not match'); return }
+                    setPassword.mutate({ id: member.id, password: pw })
+                  }}
+                >
+                  {setPassword.isPending ? 'Saving…' : 'Update password'}
+                </Button>
+              </div>
             )}
           </div>
 

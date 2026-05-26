@@ -2,9 +2,10 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, tenantProcedure } from '../trpc'
 import { sendEmail, receiptEmail, orderInvoiceEmail, APP_URL } from '../lib/email'
+import { sendSms } from '../lib/sms'
 
 export const notificationsRouter = router({
-  // Send a receipt email for a paid order
+  // Send a receipt email/SMS for a paid order
   sendReceipt: tenantProcedure
     .input(z.object({ order_id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
@@ -12,7 +13,7 @@ export const notificationsRouter = router({
         .from('orders')
         .select(`
           *,
-          customer:customers(first_name, last_name, email),
+          customer:customers(first_name, last_name, email, phone),
           lines:order_lines(name, quantity, unit_label, unit_price, line_total),
           payments(method, amount, processed_at)
         `)
@@ -22,8 +23,16 @@ export const notificationsRouter = router({
 
       if (!order) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      const email = (order.customer as { email?: string | null } | null)?.email
-      if (!email) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Customer has no email address' })
+      const customer = order.customer as { first_name: string; last_name: string; email?: string | null; phone?: string | null } | null
+      const email = customer?.email ?? null
+      const phone = customer?.phone ?? null
+
+      const hasEmail = !!email || !!process.env.NOTIFICATION_OVERRIDE_EMAIL
+      const hasPhone = !!phone || !!process.env.NOTIFICATION_OVERRIDE_PHONE
+
+      if (!hasEmail && !hasPhone) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Customer has no email or phone number' })
+      }
 
       const { data: tenant } = await ctx.supabase
         .from('tenants')
@@ -33,28 +42,37 @@ export const notificationsRouter = router({
 
       const storeName = tenant?.name ?? 'Laundry'
       const storePhone = (tenant?.settings as { phone?: string })?.phone ?? null
-      const customer = order.customer as { first_name: string; last_name: string } | null
       const customerName = customer ? `${customer.first_name} ${customer.last_name}` : 'Customer'
       const payments = (order.payments as { method: string; amount: number; processed_at?: string }[]) ?? []
 
-      const { subject, html } = receiptEmail({
-        storeName,
-        storePhone,
-        customerName,
-        orderNumber: order.order_number,
-        lines: (order.lines as { name: string; quantity: number; unit_label: string; unit_price: number; line_total: number }[]) ?? [],
-        subtotal: order.subtotal,
-        taxAmount: order.tax_amount,
-        total: order.total_amount,
-        paidAmount: order.paid_amount,
-        payments,
-      })
+      // ── Email ────────────────────────────────────────────────────────────────
+      if (hasEmail) {
+        const { subject, html } = receiptEmail({
+          storeName,
+          storePhone,
+          customerName,
+          orderNumber:  order.order_number,
+          lines:        (order.lines as { name: string; quantity: number; unit_label: string; unit_price: number; line_total: number }[]) ?? [],
+          subtotal:     order.subtotal,
+          taxAmount:    order.tax_amount,
+          total:        order.total_amount,
+          paidAmount:   order.paid_amount,
+          payments,
+        })
+        await sendEmail({ to: email ?? 'fallback@placeholder.invalid', subject, html, replyTo: storePhone ?? undefined })
+      }
 
-      await sendEmail({ to: email, subject, html, replyTo: storePhone ?? undefined })
+      // ── SMS ──────────────────────────────────────────────────────────────────
+      if (hasPhone) {
+        const total = `$${(order.total_amount / 100).toFixed(2)}`
+        const body = `${storeName}: Receipt for order #${order.order_number} — ${total} paid. Thank you!`
+        await sendSms(phone ?? '', body)
+      }
+
       return { sent: true }
     }),
 
-  // Send an invoice email (unpaid order, with pay link)
+  // Send an invoice email/SMS (unpaid order, with pay link)
   sendInvoice: tenantProcedure
     .input(z.object({ order_id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
@@ -62,7 +80,7 @@ export const notificationsRouter = router({
         .from('orders')
         .select(`
           *,
-          customer:customers(first_name, last_name, email),
+          customer:customers(first_name, last_name, email, phone),
           lines:order_lines(name, quantity, unit_label, unit_price, line_total)
         `)
         .eq('id', input.order_id)
@@ -71,8 +89,16 @@ export const notificationsRouter = router({
 
       if (!order) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      const email = (order.customer as { email?: string | null } | null)?.email
-      if (!email) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Customer has no email address' })
+      const customer = order.customer as { first_name: string; last_name: string; email?: string | null; phone?: string | null } | null
+      const email = customer?.email ?? null
+      const phone = customer?.phone ?? null
+
+      const hasEmail = !!email || !!process.env.NOTIFICATION_OVERRIDE_EMAIL
+      const hasPhone = !!phone || !!process.env.NOTIFICATION_OVERRIDE_PHONE
+
+      if (!hasEmail && !hasPhone) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Customer has no email or phone number' })
+      }
 
       const { data: tenant } = await ctx.supabase
         .from('tenants')
@@ -82,26 +108,34 @@ export const notificationsRouter = router({
 
       const storeName = tenant?.name ?? 'Laundry'
       const storePhone = (tenant?.settings as { phone?: string })?.phone ?? null
-      const customer = order.customer as { first_name: string; last_name: string } | null
       const customerName = customer ? `${customer.first_name} ${customer.last_name}` : 'Customer'
-      const balance = order.total_amount - order.paid_amount
-
+      const balance = order.total_amount - (order.paid_amount ?? 0)
       const paymentLink = `${APP_URL}/pay/${order.id}?t=${order.payment_token}`
 
-      const { subject, html } = orderInvoiceEmail({
-        storeName,
-        storePhone,
-        customerName,
-        orderNumber: order.order_number,
-        lines: (order.lines as { name: string; quantity: number; unit_label: string; unit_price: number; line_total: number }[]) ?? [],
-        subtotal: order.subtotal,
-        taxAmount: order.tax_amount,
-        total: order.total_amount,
-        balance,
-        paymentLink,
-      })
+      // ── Email ────────────────────────────────────────────────────────────────
+      if (hasEmail) {
+        const { subject, html } = orderInvoiceEmail({
+          storeName,
+          storePhone,
+          customerName,
+          orderNumber:  order.order_number,
+          lines:        (order.lines as { name: string; quantity: number; unit_label: string; unit_price: number; line_total: number }[]) ?? [],
+          subtotal:     order.subtotal,
+          taxAmount:    order.tax_amount,
+          total:        order.total_amount,
+          balance,
+          paymentLink,
+        })
+        await sendEmail({ to: email ?? 'fallback@placeholder.invalid', subject, html })
+      }
 
-      await sendEmail({ to: email, subject, html })
+      // ── SMS ──────────────────────────────────────────────────────────────────
+      if (hasPhone) {
+        const total = `$${(balance / 100).toFixed(2)}`
+        const body = `${storeName}: Invoice for order #${order.order_number} — ${total} due. Pay online: ${paymentLink}`
+        await sendSms(phone ?? '', body)
+      }
+
       return { sent: true }
     }),
 })

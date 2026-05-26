@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
-import { X, WashingMachine, Wind, FoldVertical, Pencil, Camera } from 'lucide-react'
+import { X, WashingMachine, Wind, FoldVertical, Pencil, Camera, Printer } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { formatCurrency, cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -133,6 +133,81 @@ function formatPreferences(prefs: Record<string, string> | null | undefined): st
     .filter(([, v]) => v)
     .map(([k, v]) => `${LABELS[k] ?? k}: ${v}`)
     .join(' · ')
+}
+
+// ─── Print receipt ────────────────────────────────────────────────────────────
+
+function printReceipt(order: OrderRow, storeName: string) {
+  const customerName = order.customer
+    ? `${order.customer.first_name} ${order.customer.last_name}`
+    : order.customer_name ?? 'Walk-in'
+
+  const lines = order.lines.filter((l) => l.category !== 'upcharge')
+  const upcharges = order.lines.filter((l) => l.category === 'upcharge')
+
+  const lineRows = [...lines, ...upcharges].map((l) => `
+    <tr>
+      <td style="padding:2px 0;font-size:12px;">${l.name}</td>
+      <td style="padding:2px 0;font-size:12px;text-align:right;">${
+        l.unit_label === 'lb'
+          ? `${l.quantity % 1 === 0 ? l.quantity : l.quantity.toFixed(1)} lb`
+          : `× ${l.quantity}`
+      }</td>
+      <td style="padding:2px 0;font-size:12px;text-align:right;">$${(l.unit_price * l.quantity / 100).toFixed(2)}</td>
+    </tr>
+  `).join('')
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Receipt — ${order.order_number}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Courier New', monospace; width: 72mm; padding: 8px 4px; font-size: 12px; color: #000; }
+    .center { text-align: center; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 6px 0; }
+    table { width: 100%; border-collapse: collapse; }
+    .total-row td { font-weight: bold; font-size: 13px; padding-top: 4px; }
+    @media print { @page { margin: 0; size: 72mm auto; } }
+  </style>
+</head>
+<body>
+  <div class="center bold" style="font-size:15px;margin-bottom:2px;">${storeName}</div>
+  <div class="center" style="font-size:11px;margin-bottom:6px;">${new Date(order.created_at).toLocaleDateString('en-CA', { year:'numeric', month:'short', day:'numeric' })}</div>
+  <div class="divider"></div>
+  <div style="margin-bottom:4px;">
+    <span class="bold">Order:</span> ${order.order_number}<br/>
+    <span class="bold">Customer:</span> ${customerName}
+  </div>
+  <div class="divider"></div>
+  <table>
+    <tbody>${lineRows}</tbody>
+  </table>
+  <div class="divider"></div>
+  <table>
+    <tbody>
+      <tr class="total-row">
+        <td>TOTAL</td>
+        <td></td>
+        <td style="text-align:right;">$${(order.total_amount / 100).toFixed(2)}</td>
+      </tr>
+      <tr>
+        <td colspan="3" style="font-size:11px;padding-top:2px;text-align:right;">
+          ${order.payment_status === 'paid' ? '✓ PAID' : 'BALANCE DUE'}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="divider"></div>
+  <div class="center" style="font-size:11px;margin-top:4px;">Thank you!</div>
+  <script>window.onload = () => { window.print(); window.onafterprint = () => window.close(); }</script>
+</body>
+</html>`
+
+  const w = window.open('', '_blank', 'width=320,height=500')
+  if (w) { w.document.write(html); w.document.close() }
 }
 
 // ─── Progress pill ────────────────────────────────────────────────────────────
@@ -355,7 +430,7 @@ function AssignModal({ orderId, orderNumber, currentAssignments, busyEquipment, 
 
 // ─── Order card ────────────────────────────────────────────────────────────────
 
-function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenPayment }: { order: OrderRow; index: number; onAssign: (id: string) => void; onViewDetail: (id: string) => void; onOpenIssues: (order: OrderRow) => void; onOpenPayment: (order: OrderRow) => void }) {
+function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenPayment, onPrintReceipt }: { order: OrderRow; index: number; onAssign: (id: string) => void; onViewDetail: (id: string) => void; onOpenIssues: (order: OrderRow) => void; onOpenPayment: (order: OrderRow) => void; onPrintReceipt: (order: OrderRow) => void }) {
   const utils = trpc.useUtils()
   const [pendingStatus, setPendingStatus] = useState<string | null>(null)
   const [readyConfirmEquipment, setReadyConfirmEquipment] = useState<string[] | null>(null)
@@ -517,6 +592,14 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
             <Camera className="h-3 w-3" />
             Issues{order.issues?.length > 0 ? ` (${order.issues.length})` : ''}
           </button>
+          <button
+            onClick={() => onPrintReceipt(order)}
+            className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors whitespace-nowrap"
+            title="Print receipt"
+          >
+            <Printer className="h-3 w-3" />
+            Print
+          </button>
           {canEdit && (
             <Link href={`/pos?orderId=${order.id}`}
               className={cn(
@@ -644,6 +727,9 @@ export default function OrdersPage() {
   const [issuesOrder, setIssuesOrder] = useState<OrderRow | null>(null)
   const [paymentOrder, setPaymentOrder] = useState<OrderRow | null>(null)
 
+  const { data: tenant } = trpc.tenants.getCurrent.useQuery()
+  const storeName = tenant?.name ?? 'Laundry'
+
   const { data: orders = [], isLoading } = trpc.orders.list.useQuery(
     activeFilter.value
       ? { status: activeFilter.value }
@@ -699,6 +785,7 @@ export default function OrdersPage() {
             onViewDetail={(id) => setViewingOrderId(id)}
             onOpenIssues={(o) => setIssuesOrder(o)}
             onOpenPayment={(o) => setPaymentOrder(o)}
+            onPrintReceipt={(o) => printReceipt(o, storeName)}
           />
         ))}
       </div>

@@ -31,6 +31,25 @@ export const prepaidCardsRouter = router({
         customer:customers(id, first_name, last_name)
       `
 
+      // Helper: fetch live Nayax balance and sync to DB if it changed
+      async function syncNayaxBalance(card: { id: string; card_unique_identifier: string | null; balance_cents: number }) {
+        if (!card.card_unique_identifier) return card.balance_cents
+        try {
+          const liveBalanceDollars = await getCardBalance(card.card_unique_identifier)
+          const liveBalanceCents   = Math.round(liveBalanceDollars * 100)
+          if (liveBalanceCents !== card.balance_cents) {
+            await ctx.supabase
+              .from('customer_gift_cards')
+              .update({ balance_cents: liveBalanceCents, updated_at: new Date().toISOString() })
+              .eq('id', card.id)
+          }
+          return liveBalanceCents
+        } catch {
+          // Nayax unreachable — return our cached value
+          return card.balance_cents
+        }
+      }
+
       // 1. Try card_unique_identifier first (exact, from NFC tap)
       if (input.card_unique_identifier) {
         const { data } = await ctx.supabase
@@ -39,7 +58,10 @@ export const prepaidCardsRouter = router({
           .eq('tenant_id', ctx.tenantId)
           .eq('card_unique_identifier', input.card_unique_identifier)
           .maybeSingle()
-        if (data) return { source: 'db' as const, card: data }
+        if (data) {
+          const balance_cents = await syncNayaxBalance(data as { id: string; card_unique_identifier: string | null; balance_cents: number })
+          return { source: 'db' as const, card: { ...data, balance_cents } }
+        }
       }
 
       // 2. Try display number (typed manually)
@@ -51,9 +73,12 @@ export const prepaidCardsRouter = router({
           .eq('tenant_id', ctx.tenantId)
           .eq('card_display_number', num)
           .maybeSingle()
-        if (data) return { source: 'db' as const, card: data }
+        if (data) {
+          const balance_cents = await syncNayaxBalance(data as { id: string; card_unique_identifier: string | null; balance_cents: number })
+          return { source: 'db' as const, card: { ...data, balance_cents } }
+        }
 
-        // Not in our DB — try Nayax preview so staff can import
+        // Not in our DB — try Nayax directly so staff can add it
         try {
           const nayaxCard = await lookupCardByDisplayNumber(num)
           let balance_dollars: number | null = null

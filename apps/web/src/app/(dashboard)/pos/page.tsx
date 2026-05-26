@@ -553,7 +553,14 @@ function POSInner() {
             <h2 className="mb-4 text-lg font-bold text-gray-900">Payment</h2>
             <PaymentModal orderId={paymentOrderId} totalCents={orderTotal}
               customer={customer}
-              excludeMethods={cartLines.some(l => l.category === 'gift_card') ? ['prepaid_card'] : undefined}
+              excludeMethods={[
+                // Can't pay for a gift card purchase with another gift card
+                ...(cartLines.some(l => l.category === 'gift_card') ? ['prepaid_card' as const] : []),
+                // Gift cards and products are fulfilled instantly — "pay later" makes no sense
+                ...(cartLines.length > 0 && cartLines.every(l => ['gift_card', 'product'].includes(l.category))
+                  ? ['pay_on_collection' as const]
+                  : []),
+              ]}
               onComplete={handlePaymentComplete} onCancel={() => setPaymentOrderId(null)} />
           </div>
         </div>

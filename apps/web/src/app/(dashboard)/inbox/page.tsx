@@ -97,7 +97,7 @@ export default function InboxPage() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [selectedId, refetchInbox, refetchThread, utils])
+  }, [selectedId, utils])
 
   // Mark as read when opening a conversation
   useEffect(() => {

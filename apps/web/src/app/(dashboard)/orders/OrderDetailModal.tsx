@@ -307,7 +307,7 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
         initialTab={showCustomerProfile}
       />
     )}
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
       <div className="relative flex w-full max-w-4xl flex-col max-h-[90vh] rounded-2xl bg-white shadow-2xl overflow-hidden">
 
         {/* Header */}

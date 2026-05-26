@@ -8,7 +8,7 @@ import { ServiceGrid } from '@/components/pos/ServiceGrid'
 import { OrderCart, type CartLine } from '@/components/pos/OrderCart'
 import { PaymentModal } from '@/components/pos/PaymentModal'
 import { BagEntryModal } from '@/components/pos/BagEntryModal'
-import { SchedulePickupModal } from '@/components/pos/SchedulePickupModal'
+import { ScheduleModal } from '@/components/pickups/ScheduleModal'
 import { CustomItemModal } from '@/components/pos/CustomItemModal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -567,8 +567,9 @@ function POSInner() {
       )}
 
       {schedulePickupOpen && (
-        <SchedulePickupModal
+        <ScheduleModal
           onClose={() => setSchedulePickupOpen(false)}
+          onSaved={() => setSchedulePickupOpen(false)}
         />
       )}
 

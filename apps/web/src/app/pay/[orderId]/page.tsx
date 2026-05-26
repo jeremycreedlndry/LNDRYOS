@@ -42,14 +42,6 @@ function fmt(cents: number) {
   return `$${(cents / 100).toFixed(2)}`
 }
 
-const TIP_OPTIONS = [
-  { label: 'No tip', pct: 0 },
-  { label: '15%',    pct: 15 },
-  { label: '18%',    pct: 18 },
-  { label: '20%',    pct: 20 },
-  { label: '25%',    pct: 25 },
-]
-
 // ─── Helcim script loader ─────────────────────────────────────────────────────
 
 function useHelcimScript() {
@@ -75,7 +67,6 @@ export default function PayPage() {
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState<string | null>(null)
   const [paid,      setPaid]      = useState(false)
-  const [tipPct,    setTipPct]    = useState(0)
   const [saveCard,  setSaveCard]  = useState(false)
   const [paying,    setPaying]    = useState(false)
   const [payError,  setPayError]  = useState<string | null>(null)
@@ -166,14 +157,11 @@ export default function PayPage() {
     setPaying(true)
     setPayError(null)
 
-    const balance  = order.total_amount - (order.paid_amount ?? 0)
-    const tipCents = Math.round(balance * tipPct / 100)
-
     // Initialize Helcim checkout session
     const res = await fetch('/api/pay/helcim-init', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_id: orderId, payment_token: getPayToken(), tip_cents: tipCents }),
+      body: JSON.stringify({ order_id: orderId, payment_token: getPayToken() }),
     })
     const { checkoutToken, error: initErr } = await res.json()
     if (initErr) { setPayError(initErr); setPaying(false); return }
@@ -190,8 +178,6 @@ export default function PayPage() {
   const storeName    = (order?.tenant?.name) ?? 'The LNDRY Co.'
   const storePhone   = (order?.tenant?.settings as Record<string, string> | undefined)?.phone
   const balance      = order ? (order.total_amount - (order.paid_amount ?? 0)) : 0
-  const tipCents     = Math.round(balance * tipPct / 100)
-  const totalWithTip = balance + tipCents
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4">
@@ -285,14 +271,9 @@ export default function PayPage() {
                     <span>Paid</span><span>−{fmt(order.paid_amount)}</span>
                   </div>
                 )}
-                {tipCents > 0 && (
-                  <div className="flex justify-between text-sm text-gray-500">
-                    <span>Tip ({tipPct}%)</span><span>{fmt(tipCents)}</span>
-                  </div>
-                )}
                 <div className="flex justify-between font-bold text-gray-900 text-base pt-1 border-t border-gray-200 mt-1">
                   <span>Total due</span>
-                  <span>{fmt(totalWithTip)}</span>
+                  <span>{fmt(balance)}</span>
                 </div>
               </div>
 
@@ -303,27 +284,6 @@ export default function PayPage() {
                   <p className="text-sm text-gray-600">{order.notes}</p>
                 </div>
               )}
-
-              {/* Tip selector */}
-              <div className="px-5 py-4 border-t border-gray-100">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2.5">Add a tip</p>
-                <div className="flex gap-2">
-                  {TIP_OPTIONS.map(opt => (
-                    <button
-                      key={opt.pct}
-                      type="button"
-                      onClick={() => setTipPct(opt.pct)}
-                      className={`flex-1 rounded-lg py-2 text-xs font-semibold border transition-colors ${
-                        tipPct === opt.pct
-                          ? 'bg-gray-900 text-white border-gray-900'
-                          : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
 
               {/* Save card */}
               <div className="px-5 pb-4 border-t border-gray-100 pt-3">
@@ -356,7 +316,7 @@ export default function PayPage() {
                   className="w-full rounded-xl bg-gray-900 px-6 py-4 text-white font-bold text-base hover:bg-gray-800 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
                 >
                   <CreditCard className="h-4 w-4" />
-                  {paying ? 'Processing…' : `Pay ${fmt(totalWithTip)} securely`}
+                  {paying ? 'Processing…' : `Pay ${fmt(balance)} securely`}
                 </button>
                 <p className="text-center text-xs text-gray-400 mt-3">
                   Secured with SSL · Powered by Helcim

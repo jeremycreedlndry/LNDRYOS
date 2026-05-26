@@ -242,9 +242,13 @@ function EditTab({ customer, onSaved }: { customer: Customer; onSaved: () => voi
       setHelcimToken(null)
 
       if (event.data.eventStatus === 'SUCCESS') {
-        const txn = event.data.eventMessage?.data as {
+        // Helcim sends eventMessage as a JSON string; parse then drill into .data.data
+        const raw = event.data.eventMessage
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const parsed: any = typeof raw === 'string' ? JSON.parse(raw) : (raw ?? {})
+        const txn = parsed?.data?.data ?? {} as {
           cardToken?: string; cardNumber?: string; cardType?: string
-        } | undefined
+        }
         try {
           await saveCardToken.mutateAsync({
             customer_id: customer.id,

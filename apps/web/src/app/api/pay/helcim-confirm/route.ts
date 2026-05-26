@@ -70,12 +70,7 @@ export async function POST(req: NextRequest) {
   } = body
 
   if (!order_id || !payment_token) {
-    console.error('[helcim-confirm] Missing params:', { order_id: !!order_id, payment_token: !!payment_token })
-    return NextResponse.json({ error: `Missing params: order_id=${!!order_id} token=${!!payment_token}` }, { status: 400 })
-  }
-  // transaction_id is logged for audit but not required — its field name varies across Helcim event versions
-  if (!transaction_id) {
-    console.warn('[helcim-confirm] transaction_id missing — proceeding without it. Full body:', JSON.stringify(body))
+    return NextResponse.json({ error: 'Missing params' }, { status: 400 })
   }
 
   // Verify order + token

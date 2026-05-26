@@ -120,14 +120,9 @@ function LookupResultCard({ result, onLinked }: {
   onLinked: () => void
 }) {
   const [mode, setMode] = useState<null | 'find' | 'create'>(null)
-  const utils = trpc.useUtils()
 
-  const linkMutation    = trpc.prepaidCards.linkToCustomer.useMutation({
+  const linkMutation = trpc.prepaidCards.linkToCustomer.useMutation({
     onSuccess: () => { toast.success('Card linked!'); onLinked(); setMode(null) },
-    onError:   (e) => toast.error(e.message),
-  })
-  const importMutation  = trpc.prepaidCards.import.useMutation({
-    onSuccess: () => { toast.success('Card imported'); utils.prepaidCards.listAll.invalidate(); onLinked() },
     onError:   (e) => toast.error(e.message),
   })
 
@@ -231,102 +226,6 @@ function LookupResultCard({ result, onLinked }: {
 
         {card.notes && (
           <p className="text-xs text-gray-400 italic">{card.notes}</p>
-        )}
-      </div>
-    )
-  }
-
-  // ── Card found in Nayax but not yet in our DB ─────────────────────────────
-  if (result.source === 'nayax') {
-    const preview = result.preview
-    return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
-            <CreditCard className="h-5 w-5 text-amber-600" />
-          </div>
-          <div>
-            <p className="text-xs text-amber-600 font-medium">Found in Nayax — not yet imported</p>
-            <p className="text-base font-bold text-gray-900 font-mono">{preview.card_display_number}</p>
-          </div>
-        </div>
-        {preview.balance_cents != null && (
-          <div className="rounded-lg bg-white px-4 py-3 flex items-center justify-between border border-amber-100">
-            <span className="text-sm text-gray-500">Balance (Nayax)</span>
-            <span className="text-2xl font-bold text-gray-900">{formatCurrency(preview.balance_cents)}</span>
-          </div>
-        )}
-        {preview.holder_name && (
-          <p className="text-sm text-gray-600">Holder on Nayax: <span className="font-medium">{preview.holder_name}</span></p>
-        )}
-
-        {mode === null && (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setMode('find')}
-              className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-gray-300 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-            >
-              <Link2 className="h-4 w-4" />
-              Import & Link Customer
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('create')}
-              className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-gray-900 py-2 text-sm font-medium text-white hover:bg-gray-800"
-            >
-              <UserPlus className="h-4 w-4" />
-              Import & New Customer
-            </button>
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => importMutation.mutate({
-            card_display_number:    preview.card_display_number,
-            card_unique_identifier: preview.card_unique_identifier,
-            card_id:                preview.card_id,
-            balance_cents:          preview.balance_cents ?? 0,
-          })}
-          className="w-full rounded-lg border border-gray-300 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-        >
-          Import Without Owner
-        </button>
-
-        {mode === 'find' && (
-          <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Find Customer</p>
-              <button type="button" onClick={() => setMode(null)} className="text-gray-400 hover:text-gray-600"><X className="h-3.5 w-3.5" /></button>
-            </div>
-            <CustomerPicker onSelect={(customerId) => {
-              importMutation.mutate({
-                card_display_number:    preview.card_display_number,
-                card_unique_identifier: preview.card_unique_identifier,
-                card_id:                preview.card_id,
-                balance_cents:          preview.balance_cents ?? 0,
-                customer_id:            customerId,
-              })
-            }} />
-          </div>
-        )}
-
-        {mode === 'create' && (
-          <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">New Customer</p>
-              <button type="button" onClick={() => setMode(null)} className="text-gray-400 hover:text-gray-600"><X className="h-3.5 w-3.5" /></button>
-            </div>
-            <NewCustomerForm onCreated={(customerId) => {
-              importMutation.mutate({
-                card_display_number:    preview.card_display_number,
-                card_unique_identifier: preview.card_unique_identifier,
-                card_id:                preview.card_id,
-                balance_cents:          preview.balance_cents ?? 0,
-                customer_id:            customerId,
-              })
-            }} />
-          </div>
         )}
       </div>
     )

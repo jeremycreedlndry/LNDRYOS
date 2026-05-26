@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Banknote, CreditCard, Star, Package, Receipt, CheckCircle, Wallet, Loader2, Gift } from 'lucide-react'
+import { Banknote, CreditCard, Star, Package, Receipt, CheckCircle, Wallet, Loader2, Gift, Tag, X as XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatCurrency, cn } from '@/lib/utils'
@@ -75,6 +75,15 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   const [tipCustom, setTipCustom] = useState('')
   const [showTipInput, setShowTipInput] = useState(false)
 
+  // Promo code
+  const [promoInput, setPromoInput] = useState('')
+  const [promoResult, setPromoResult] = useState<{
+    valid: true; promo_code_id: string; discount_cents: number
+    discount_type: 'percent' | 'flat'; discount_value: number; description: string | null
+  } | null>(null)
+  const [promoError, setPromoError] = useState('')
+  const [promoLoading, setPromoLoading] = useState(false)
+
   // Cash
   const [cashTendered, setCashTendered] = useState('')
   const [changeDue, setChangeDue] = useState(0)
@@ -100,13 +109,17 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
     enabled: method === 'card_terminal' || step === 'select',
   })
 
+  const maybeRecordPromo = (orderId: string) => {
+    if (promoResult) recordPromoUse.mutate({ promo_code_id: promoResult.promo_code_id, customer_id: customer?.id ?? null, order_id: orderId })
+  }
+
   const recordCash = trpc.payments.recordCashPayment.useMutation({
-    onSuccess: (data) => { setChangeDue(data.change_due ?? 0); setStep('success') },
+    onSuccess: (data) => { maybeRecordPromo(orderId); setChangeDue(data.change_due ?? 0); setStep('success') },
     onError: (e) => toast.error(e.message),
   })
 
   const recordManual = trpc.payments.recordManualPayment.useMutation({
-    onSuccess: () => setStep('success'),
+    onSuccess: () => { maybeRecordPromo(orderId); setStep('success') },
     onError: (e) => toast.error(e.message),
   })
 
@@ -125,12 +138,12 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
   })
 
   const chargeSaved = trpc.payments.chargeSavedCard.useMutation({
-    onSuccess: () => setStep('success'),
+    onSuccess: () => { maybeRecordPromo(orderId); setStep('success') },
     onError: (e) => toast.error(e.message),
   })
 
   const chargePrepaid = trpc.payments.chargePrepaidCard.useMutation({
-    onSuccess: () => setStep('success'),
+    onSuccess: () => { maybeRecordPromo(orderId); setStep('success') },
     onError: (e) => toast.error(e.message),
   })
 
@@ -178,6 +191,7 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
           setTerminalStatus('Approved!')
           stopPolling()
           if (terminalPaymentId) {
+            maybeRecordPromo(orderId)
             confirmTerminal.mutate({
               payment_id: terminalPaymentId,
               helcim_transaction_id: terminalTxnId,
@@ -207,6 +221,36 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
 
   // ── Tip calculation ───────────────────────────────────────────────────────
 
+  const recordPromoUse = trpc.promoCodes.recordUse.useMutation()
+
+  const promoDiscountCents = promoResult?.discount_cents ?? 0
+
+  const handleApplyPromo = async () => {
+    const code = promoInput.trim().toUpperCase()
+    if (!code) return
+    setPromoError('')
+    setPromoLoading(true)
+    try {
+      const result = await utils.promoCodes.validate.fetch({
+        code,
+        customer_id: customer?.id ?? null,
+        order_total: totalCents,
+      })
+      if (!result.valid) {
+        setPromoError(result.reason)
+      } else {
+        setPromoResult(result)
+        setPromoError('')
+      }
+    } catch {
+      setPromoError('Failed to validate code')
+    } finally {
+      setPromoLoading(false)
+    }
+  }
+
+  const clearPromo = () => { setPromoResult(null); setPromoInput(''); setPromoError('') }
+
   const resolvedTip = (() => {
     if (tipPreset === null && !tipCustom) return 0
     const val = tipPreset !== null ? tipPreset : parseFloat(tipCustom)
@@ -215,7 +259,7 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
     return Math.round(totalCents * val / 100)
   })()
 
-  const grandTotal = totalCents + resolvedTip
+  const grandTotal = Math.max(0, totalCents - promoDiscountCents) + resolvedTip
 
   const hasSavedCard = !!(customer?.saved_card_last4)
   const hasTerminals = terminals.length > 0
@@ -569,6 +613,48 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
         </p>
       )}
 
+      {/* Promo code */}
+      <div className="rounded-xl border border-gray-200 p-3">
+        {promoResult ? (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Tag className="h-4 w-4 text-green-600 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-green-700">{promoInput.toUpperCase()} applied</p>
+                <p className="text-xs text-gray-500">
+                  -{formatCurrency(promoResult.discount_cents)}
+                  {promoResult.description ? ` · ${promoResult.description}` : ''}
+                </p>
+              </div>
+            </div>
+            <button onClick={clearPromo} className="text-gray-400 hover:text-gray-600">
+              <XIcon className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                value={promoInput}
+                onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setPromoError('') }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleApplyPromo() } }}
+                placeholder="Promo code"
+                className="w-full rounded-lg border border-gray-200 pl-9 pr-3 py-2 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+            </div>
+            <button
+              onClick={handleApplyPromo}
+              disabled={!promoInput.trim() || promoLoading}
+              className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+            >
+              {promoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Apply'}
+            </button>
+          </div>
+        )}
+        {promoError && <p className="text-xs text-red-600 mt-1.5">{promoError}</p>}
+      </div>
+
       {/* Tip */}
       <div className="rounded-xl border border-gray-200 p-3 space-y-3">
         <div className="flex items-center justify-between">
@@ -612,6 +698,12 @@ export function PaymentModal({ orderId, totalCents, customer, excludeMethods, on
         <div className="flex justify-between text-gray-600">
           <span>Order total</span><span>{formatCurrency(totalCents)}</span>
         </div>
+        {promoDiscountCents > 0 && (
+          <div className="flex justify-between text-green-700">
+            <span>Promo ({promoInput.toUpperCase()})</span>
+            <span>−{formatCurrency(promoDiscountCents)}</span>
+          </div>
+        )}
         {resolvedTip > 0 && (
           <div className="flex justify-between text-gray-600">
             <span>Tip</span><span>{formatCurrency(resolvedTip)}</span>

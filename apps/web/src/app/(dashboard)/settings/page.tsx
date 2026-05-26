@@ -24,6 +24,7 @@ import { ZonesTab } from './ZonesTab'
 import { StaffTab } from './StaffTab'
 import { BusinessAccountsTab } from './BusinessAccountsTab'
 import { HardwareTab } from './HardwareTab'
+import { PromoCodesTab } from './PromoCodesTab'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -562,7 +563,7 @@ function ServicesTab() {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type Tab = 'services' | 'store' | 'preferences' | 'machines' | 'folding' | 'integrations' | 'delivery' | 'staff' | 'businesses' | 'hardware'
+type Tab = 'services' | 'store' | 'preferences' | 'machines' | 'folding' | 'integrations' | 'delivery' | 'staff' | 'businesses' | 'hardware' | 'promos'
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('services')
@@ -581,6 +582,7 @@ export default function SettingsPage() {
           ['staff',       'Staff'],
           ['businesses',  'Business Accounts'],
           ['hardware',    'Hardware'],
+          ['promos',      'Promo Codes'],
         ] as [Tab, string][]).map(([value, label]) => (
           <button key={value} onClick={() => setTab(value)}
             className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${tab === value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -598,6 +600,7 @@ export default function SettingsPage() {
       {tab === 'staff'        && <StaffTab />}
       {tab === 'businesses'   && <BusinessAccountsTab />}
       {tab === 'hardware'     && <HardwareTab />}
+      {tab === 'promos'       && <PromoCodesTab />}
     </div>
   )
 }

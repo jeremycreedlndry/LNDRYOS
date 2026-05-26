@@ -666,7 +666,8 @@ async function sendOrderCreatedEmail(supabase: any, tenantId: string, order: any
   }
 
   if ((pref === 'sms' || pref === 'sms_email') && customer.phone) {
-    const body = orderCreatedSms(storeName, order.order_number)
+    const paymentLink = `${APP_URL}/pay/${order.id}?t=${order.payment_token}`
+    const body = orderCreatedSms(storeName, order.order_number, order.total_amount, paymentLink)
     await sendSms(customer.phone, body)
     await logMessage(supabase, { tenant_id: tenantId, customer_id: order.customer_id, direction: 'outbound', channel: 'sms', body, to_address: customer.phone })
   }

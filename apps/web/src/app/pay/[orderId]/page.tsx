@@ -79,6 +79,7 @@ export default function PayPage() {
     const token = getPayToken()
     if (!orderId || !token) { setError('Invalid payment link'); setLoading(false); return }
 
+
     fetch(`/api/pay/order-details?id=${orderId}&t=${token}`)
       .then(r => r.json())
       .then(data => {
@@ -86,6 +87,9 @@ export default function PayPage() {
         else {
           setOrder(data)
           if (data.payment_status === 'paid') setPaid(true)
+          // Update browser tab title once order is loaded
+          const storeName = data.tenant?.name ?? 'The LNDRY Co.'
+          document.title = `${storeName}: ${data.order_number}`
         }
       })
       .catch(() => setError('Failed to load order'))

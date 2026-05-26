@@ -54,8 +54,14 @@ export async function sendSms(to: string, message: string): Promise<void> {
 
 // ─── Message templates ────────────────────────────────────────────────────────
 
-export function orderCreatedSms(storeName: string, orderNumber: string): string {
-  return `${storeName}: Your order #${orderNumber} has been received and is now being cleaned. We'll text you when it's ready!`
+export function orderCreatedSms(
+  storeName: string,
+  orderNumber: string,
+  totalCents: number,
+  paymentLink: string,
+): string {
+  const total = `$${(totalCents / 100).toFixed(2)}`
+  return `${storeName}: Your order #${orderNumber} has been received and is now being cleaned. Total: ${total}. View details: ${paymentLink}`
 }
 
 export function orderReadySms(storeName: string, orderNumber: string, paymentLink?: string): string {

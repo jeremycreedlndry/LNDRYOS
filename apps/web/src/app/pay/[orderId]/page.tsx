@@ -1,8 +1,15 @@
 'use client'
 
-import { Suspense, useEffect, useRef, useState } from 'react'
-import { useParams, useSearchParams } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
+import { useParams } from 'next/navigation'
 import { CheckCircle, AlertCircle, Shirt, CreditCard } from 'lucide-react'
+
+// Read the ?t= token directly from the browser URL — avoids Next.js useSearchParams
+// rendering issues where the hook can return empty params on server/hydration pass.
+function getPayToken(): string {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get('t') ?? ''
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,11 +67,8 @@ function useHelcimScript() {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-// useSearchParams() requires a Suspense boundary in Next.js App Router
-function PayPageInner() {
+export default function PayPage() {
   const { orderId }    = useParams<{ orderId: string }>()
-  const searchParams   = useSearchParams()
-  const token          = searchParams.get('t') ?? ''
   const helcimReady    = useHelcimScript()
 
   const [order,     setOrder]     = useState<OrderData | null>(null)
@@ -81,6 +85,7 @@ function PayPageInner() {
 
   // ── Load order details ────────────────────────────────────────────────────
   useEffect(() => {
+    const token = getPayToken()
     if (!orderId || !token) { setError('Invalid payment link'); setLoading(false); return }
 
     fetch(`/api/pay/order-details?id=${orderId}&t=${token}`)
@@ -94,7 +99,7 @@ function PayPageInner() {
       })
       .catch(() => setError('Failed to load order'))
       .finally(() => setLoading(false))
-  }, [orderId, token])
+  }, [orderId])
 
   // ── Listen for HelcimPay.js completion event ──────────────────────────────
   useEffect(() => {
@@ -127,7 +132,7 @@ function PayPageInner() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             order_id:       orderId,
-            payment_token:  token,
+            payment_token:  getPayToken(),
             transaction_id: transactionId,
             amount_cents:   amountCents,
             card_token:     cardToken,
@@ -150,7 +155,7 @@ function PayPageInner() {
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [orderId, token, saveCard])
+  }, [orderId, saveCard])
 
   // ── Handle Pay click ─────────────────────────────────────────────────────
   async function handlePay() {
@@ -165,7 +170,7 @@ function PayPageInner() {
     const res = await fetch('/api/pay/helcim-init', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_id: orderId, payment_token: token, tip_cents: tipCents }),
+      body: JSON.stringify({ order_id: orderId, payment_token: getPayToken(), tip_cents: tipCents }),
     })
     const { checkoutToken, error: initErr } = await res.json()
     if (initErr) { setPayError(initErr); setPaying(false); return }
@@ -362,14 +367,3 @@ function PayPageInner() {
   )
 }
 
-export default function PayPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-sm text-gray-400">Loading…</p>
-      </div>
-    }>
-      <PayPageInner />
-    </Suspense>
-  )
-}

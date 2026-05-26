@@ -365,11 +365,15 @@ function POSInner() {
         tax_rate: taxRate,
       })
     } else {
+      const defaultDueDays = (tenantSettings?.settings as Record<string, unknown> | null)?.default_due_days as number | undefined ?? 2
+      const dueDate = new Date()
+      dueDate.setDate(dueDate.getDate() + defaultDueDays)
       createOrder.mutate({
         customer_id: customer?.id ?? null,
         customer_name: customer ? `${customer.first_name} ${customer.last_name}` : null,
         lines: buildLines(),
         tax_rate: taxRate,
+        due_date: dueDate.toISOString().split('T')[0],
       })
     }
   }, [customer, cartLines, taxRate, createOrder, updateOrder, isEditMode, editOrderId]) // eslint-disable-line react-hooks/exhaustive-deps

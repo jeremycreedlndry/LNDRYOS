@@ -724,7 +724,14 @@ export default function WorkflowPage() {
   const [markCleanedOrder, setMarkCleanedOrder] = useState<OrderRow | null>(null)
 
   const allOrders = orders as unknown as OrderRow[]
-  const cleaning = allOrders.filter((o) => o.status === 'cleaning')
+
+  // Only show orders that have at least one item that actually needs cleaning.
+  // Gift cards and products are fulfilled instantly — they don't go through the wash/dry/fold workflow.
+  const NON_CLEANING = ['gift_card', 'product']
+  const cleaning = allOrders.filter((o) =>
+    o.status === 'cleaning' &&
+    o.lines.some((l) => !NON_CLEANING.includes(l.category))
+  )
 
   const toDoOrders = cleaning.filter((o) => !o.assignments || o.assignments.length === 0)
   const washerOrders = cleaning.filter((o) => o.assignments?.some((a) => a.equipment.type === 'washer'))

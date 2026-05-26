@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
-import { X, WashingMachine, Wind, FoldVertical, Pencil, Camera, Printer } from 'lucide-react'
+import { X, WashingMachine, Wind, FoldVertical, Pencil, Camera, Printer, AlertCircle } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { formatCurrency, cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -99,6 +99,13 @@ function formatDueDate(due: string | null): string {
   if (!due) return '—'
   const d = new Date(due)
   return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
+}
+
+const LATE_EXEMPT: string[] = ['ready', 'picked_up', 'delivered', 'cancelled']
+function isLate(order: { due_date: string | null; status: string }): boolean {
+  if (!order.due_date || LATE_EXEMPT.includes(order.status)) return false
+  const today = new Date().toISOString().split('T')[0]
+  return order.due_date < today
 }
 
 function summarizeLines(lines: OrderLine[]): { label: string; detail: string }[] {
@@ -595,12 +602,17 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
 
         {/* # + date */}
         <div className="min-w-0">
-          <button
-            onClick={() => onViewDetail(order.id)}
-            className="font-mono text-sm font-semibold text-brand-600 hover:underline text-left"
-          >
-            {order.order_number}
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onViewDetail(order.id)}
+              className="font-mono text-sm font-semibold text-brand-600 hover:underline text-left"
+            >
+              {order.order_number}
+            </button>
+            {isLate(order) && (
+              <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0" title="Overdue" />
+            )}
+          </div>
           <p className="text-xs text-gray-400 mt-0.5">
             {new Date(order.created_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
           </p>
@@ -608,7 +620,7 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
 
         {/* Ready by */}
         <div className="min-w-0">
-          <p className={cn('text-sm font-medium', order.due_date ? 'text-gray-800' : 'text-gray-300')}>
+          <p className={cn('text-sm font-medium', isLate(order) ? 'text-red-600' : order.due_date ? 'text-gray-800' : 'text-gray-300')}>
             {formatDueDate(order.due_date)}
           </p>
           <Badge variant={STATUS_BADGE[order.status] ?? 'secondary'} className="mt-1 text-[10px]">

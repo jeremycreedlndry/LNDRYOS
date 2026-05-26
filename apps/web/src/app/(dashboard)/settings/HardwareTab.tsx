@@ -158,33 +158,53 @@ function HelcimReaderForm({ terminalId }: { terminalId: string }) {
 // ─── Printer card ─────────────────────────────────────────────────────────────
 
 type PrinterType = 'receipt' | 'label'
+type ConnectionType = 'network' | 'windows_share' | 'usb' | 'bluetooth'
 
 interface PrinterConfig {
   name: string
-  connection: 'network' | 'usb' | 'bluetooth'
-  address: string // IP for network, path for USB
+  connection: ConnectionType
+  // network
+  ip: string
+  port: string
+  // windows share
+  host: string
+  share: string
+  // usb / bluetooth
+  address: string
 }
 
-function PrinterSection({ type, label, description }: { type: PrinterType; label: string; description: string }) {
+const CONNECTION_LABELS: Record<ConnectionType, string> = {
+  network:       'Network (IP)',
+  windows_share: 'Windows Share',
+  usb:           'USB',
+  bluetooth:     'Bluetooth',
+}
+
+function PrinterSection({ type, label, description, defaultConnection }: {
+  type: PrinterType
+  label: string
+  description: string
+  defaultConnection?: ConnectionType
+}) {
   const utils = trpc.useUtils()
   const { data: tenant } = trpc.tenants.getCurrent.useQuery()
   const tenantSettings = (tenant?.settings ?? {}) as Record<string, unknown>
   const hardware = (tenantSettings.hardware ?? {}) as Record<string, unknown>
   const saved = (hardware[`${type}_printer`] ?? {}) as Partial<PrinterConfig>
 
-  const [name, setName] = useState(saved.name ?? '')
-  const [connection, setConnection] = useState<PrinterConfig['connection']>(saved.connection ?? 'network')
-  const [address, setAddress] = useState(saved.address ?? '')
-  const [dirty, setDirty] = useState(false)
+  const [name,       setName]       = useState(saved.name       ?? '')
+  const [connection, setConnection] = useState<ConnectionType>(saved.connection ?? defaultConnection ?? 'network')
+  const [ip,         setIp]         = useState(saved.ip         ?? '')
+  const [port,       setPort]       = useState(saved.port       ?? '9100')
+  const [host,       setHost]       = useState(saved.host       ?? '')
+  const [share,      setShare]      = useState(saved.share      ?? '')
+  const [address,    setAddress]    = useState(saved.address    ?? '')
+  const [dirty,      setDirty]      = useState(false)
 
-  const configured = !!(saved.name || saved.address)
+  const configured = !!(saved.name || saved.ip || saved.host || saved.address)
 
   const update = trpc.tenants.updateSettings.useMutation({
-    onSuccess: () => {
-      utils.tenants.getCurrent.invalidate()
-      setDirty(false)
-      toast.success('Saved')
-    },
+    onSuccess: () => { utils.tenants.getCurrent.invalidate(); setDirty(false); toast.success('Saved') },
     onError: (e) => toast.error(e.message),
   })
 
@@ -193,28 +213,29 @@ function PrinterSection({ type, label, description }: { type: PrinterType; label
       settings: {
         hardware: {
           ...hardware,
-          [`${type}_printer`]: { name: name.trim(), connection, address: address.trim() },
+          [`${type}_printer`]: { name: name.trim(), connection, ip: ip.trim(), port: port.trim(), host: host.trim(), share: share.trim(), address: address.trim() },
         },
       },
     })
   }
 
   const handleClear = () => {
-    update.mutate({
-      settings: {
-        hardware: {
-          ...hardware,
-          [`${type}_printer`]: {},
-        },
-      },
-    })
-    setName('')
-    setAddress('')
-    setConnection('network')
+    update.mutate({ settings: { hardware: { ...hardware, [`${type}_printer`]: {} } } })
+    setName(''); setIp(''); setPort('9100'); setHost(''); setShare(''); setAddress('')
+    setConnection(defaultConnection ?? 'network')
     setDirty(false)
   }
 
   const mark = () => setDirty(true)
+
+  // Summary line shown in status badge
+  const statusLine = saved.name
+    ? saved.name
+    : saved.ip
+    ? saved.ip
+    : saved.host
+    ? `\\\\${saved.host}\\${saved.share ?? ''}`
+    : 'Configured'
 
   return (
     <HardwareCard
@@ -223,65 +244,91 @@ function PrinterSection({ type, label, description }: { type: PrinterType; label
       iconColor="text-orange-500"
       title={label}
       description={description}
-      statusLabel={configured ? (saved.name ?? 'Configured') : 'Not configured'}
+      statusLabel={configured ? statusLine : 'Not configured'}
       statusColor={configured ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}
     >
       <div className="space-y-4">
+        {/* Printer name */}
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1.5">Printer name</label>
           <Input value={name} onChange={(e) => { setName(e.target.value); mark() }} placeholder={`e.g. ${label}`} />
         </div>
 
+        {/* Connection type */}
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1.5">Connection type</label>
-          <div className="flex gap-2">
-            {(['network', 'usb', 'bluetooth'] as const).map((c) => (
+          <div className="grid grid-cols-2 gap-2">
+            {(Object.keys(CONNECTION_LABELS) as ConnectionType[]).map((c) => (
               <button
                 key={c}
                 onClick={() => { setConnection(c); mark() }}
-                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors capitalize ${
+                className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors text-left ${
                   connection === c
                     ? 'border-brand-500 bg-brand-50 text-brand-700'
                     : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
                 }`}
               >
-                {c}
+                {CONNECTION_LABELS[c]}
               </button>
             ))}
           </div>
         </div>
 
+        {/* Network IP */}
         {connection === 'network' && (
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">IP address</label>
-            <Input
-              value={address}
-              onChange={(e) => { setAddress(e.target.value); mark() }}
-              placeholder="e.g. 192.168.1.50"
-              className="font-mono text-sm"
-            />
+          <div className="grid grid-cols-3 gap-2">
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">IP address</label>
+              <Input value={ip} onChange={(e) => { setIp(e.target.value); mark() }}
+                placeholder="e.g. 192.168.1.50" className="font-mono text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">Port</label>
+              <Input value={port} onChange={(e) => { setPort(e.target.value); mark() }}
+                placeholder="9100" className="font-mono text-sm" />
+            </div>
           </div>
         )}
+
+        {/* Windows Share */}
+        {connection === 'windows_share' && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                Windows machine hostname or IP
+              </label>
+              <Input value={host} onChange={(e) => { setHost(e.target.value); mark() }}
+                placeholder="e.g. DESKTOP-ABC123 or 192.168.1.10" className="font-mono text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">Share name</label>
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-mono text-gray-400 shrink-0">\\{host || 'host'}\</span>
+                <Input value={share} onChange={(e) => { setShare(e.target.value); mark() }}
+                  placeholder="e.g. LabelPrinter" className="font-mono text-sm" />
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">
+                Found in Windows → Control Panel → Devices and Printers → right-click printer → Printer properties → Sharing.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* USB */}
         {connection === 'usb' && (
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">USB / device path</label>
-            <Input
-              value={address}
-              onChange={(e) => { setAddress(e.target.value); mark() }}
-              placeholder="e.g. /dev/usb/lp0 or USB001"
-              className="font-mono text-sm"
-            />
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">Device path</label>
+            <Input value={address} onChange={(e) => { setAddress(e.target.value); mark() }}
+              placeholder="e.g. /dev/usb/lp0 or USB001" className="font-mono text-sm" />
           </div>
         )}
+
+        {/* Bluetooth */}
         {connection === 'bluetooth' && (
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1.5">Bluetooth address</label>
-            <Input
-              value={address}
-              onChange={(e) => { setAddress(e.target.value); mark() }}
-              placeholder="e.g. AA:BB:CC:DD:EE:FF"
-              className="font-mono text-sm"
-            />
+            <Input value={address} onChange={(e) => { setAddress(e.target.value); mark() }}
+              placeholder="e.g. AA:BB:CC:DD:EE:FF" className="font-mono text-sm" />
           </div>
         )}
 
@@ -290,7 +337,8 @@ function PrinterSection({ type, label, description }: { type: PrinterType; label
             {update.isPending ? 'Saving…' : 'Save'}
           </Button>
           {configured && (
-            <Button variant="outline" onClick={handleClear} disabled={update.isPending} className="text-red-500 hover:text-red-600 border-red-200 hover:border-red-300">
+            <Button variant="outline" onClick={handleClear} disabled={update.isPending}
+              className="text-red-500 hover:text-red-600 border-red-200 hover:border-red-300">
               Clear
             </Button>
           )}
@@ -314,11 +362,13 @@ export function HardwareTab() {
         type="receipt"
         label="Receipt Printer"
         description="Prints customer receipts at checkout"
+        defaultConnection="network"
       />
       <PrinterSection
         type="label"
         label="Label Printer"
         description="Prints order labels and bag tags"
+        defaultConnection="windows_share"
       />
     </div>
   )

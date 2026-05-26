@@ -106,6 +106,26 @@ export const prepaidCardsRouter = router({
       return data
     }),
 
+  // ── List all cards for the tenant ────────────────────────────────────────
+  listAll: tenantProcedure
+    .input(z.object({
+      limit:  z.number().int().positive().default(100),
+      offset: z.number().int().min(0).default(0),
+    }).optional())
+    .query(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('customer_gift_cards')
+        .select(`
+          id, card_display_number, balance_cents, status, notes, created_at, updated_at,
+          customer:customers(id, first_name, last_name, phone)
+        `)
+        .eq('tenant_id', ctx.tenantId)
+        .order('created_at', { ascending: false })
+        .range(input?.offset ?? 0, (input?.offset ?? 0) + (input?.limit ?? 100) - 1)
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return data ?? []
+    }),
+
   // ── List cards for a customer ─────────────────────────────────────────────
   listForCustomer: tenantProcedure
     .input(z.object({ customer_id: z.string().uuid() }))

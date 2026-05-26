@@ -85,7 +85,6 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
     delivery_end: '18:00',
     delivery_days_later: 2,
     end_date: '',
-    auto_create_order: true,
     notes: initialCustomer?.driver_instructions ?? '',
   })
   const set = (k: keyof typeof form, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
@@ -319,13 +318,6 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
               </div>
             </div>
           </div>
-
-          {/* Auto-create order */}
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input type="checkbox" checked={form.auto_create_order} onChange={(e) => set('auto_create_order', e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 accent-brand-600" />
-            <span className="text-sm text-gray-700">Auto-create order when picked up</span>
-          </label>
 
           {/* Driver Instructions */}
           <div>

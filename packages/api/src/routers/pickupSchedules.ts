@@ -13,7 +13,7 @@ const scheduleSchema = z.object({
   delivery_start:      z.string().nullable().optional(),
   delivery_end:        z.string().nullable().optional(),
   delivery_days_later: z.number().int().min(0).max(14).default(2),
-  auto_create_order:   z.boolean().default(true),
+  auto_create_order:   z.boolean().default(true).optional(),
   end_date:            z.string().nullable().optional(),   // ISO date — null = no end
   notes:               z.string().nullable().optional(),
 })
@@ -73,7 +73,7 @@ export const pickupSchedulesRouter = router({
 
       const { data, error } = await ctx.supabase
         .from('pickup_schedules')
-        .insert({ ...input, tenant_id: ctx.tenantId, zone_id })
+        .insert({ ...input, tenant_id: ctx.tenantId, zone_id, auto_create_order: true })
         .select(`*, customer:customers(id, first_name, last_name, phone, address_street, address_city), zone:delivery_zones(id, name, color)`)
         .single()
 

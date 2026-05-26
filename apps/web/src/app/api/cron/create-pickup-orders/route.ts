@@ -34,10 +34,7 @@ export async function GET(req: NextRequest) {
   // Find all pickup stops for tomorrow that need an order created
   const { data: stops, error } = await supabase
     .from('pickup_stops')
-    .select(`
-      id, tenant_id, customer_id, notes, scheduled_date,
-      schedule:pickup_schedules(id, auto_create_order)
-    `)
+    .select('id, tenant_id, customer_id, notes, scheduled_date')
     .eq('scheduled_date', tomorrowStr)
     .eq('type', 'pickup')
     .eq('status', 'pending')
@@ -49,18 +46,9 @@ export async function GET(req: NextRequest) {
   }
 
   let created = 0
-  let skipped = 0
   const errors: string[] = []
 
   for (const stop of stops ?? []) {
-    const schedule = stop.schedule as unknown as { id: string; auto_create_order: boolean } | null
-
-    // Skip if schedule has auto_create_order disabled, or stop has no schedule (one-off)
-    if (!schedule?.auto_create_order) {
-      skipped++
-      continue
-    }
-
     // Get next order number for this tenant
     const { data: lastOrder } = await supabase
       .from('orders')
@@ -116,6 +104,6 @@ export async function GET(req: NextRequest) {
     created++
   }
 
-  console.log(`[cron/create-pickup-orders] date=${tomorrowStr} created=${created} skipped=${skipped} errors=${errors.length}`)
-  return NextResponse.json({ date: tomorrowStr, created, skipped, errors })
+  console.log(`[cron/create-pickup-orders] date=${tomorrowStr} created=${created} errors=${errors.length}`)
+  return NextResponse.json({ date: tomorrowStr, created, errors })
 }

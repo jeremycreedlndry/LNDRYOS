@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { MessageSquare, Send, RefreshCw } from 'lucide-react'
+import { MessageSquare, Send, RefreshCw, Pencil } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { createBrowserClient } from '@/lib/supabase-client'
+import { CustomerModal } from '@/components/customers/CustomerModal'
 import toast from 'react-hot-toast'
 
 type InboxRow = {
@@ -60,6 +61,7 @@ export default function InboxPage() {
   const utils = trpc.useUtils()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [customerModalId, setCustomerModalId] = useState<string | null>(null)
   const threadRef = useRef<HTMLDivElement>(null)
 
   const { data: inbox = [], isLoading: inboxLoading } = trpc.messages.inbox.useQuery()
@@ -115,6 +117,11 @@ export default function InboxPage() {
   }, [thread])
 
   const selected = (inbox as InboxRow[]).find((r) => r.customer_id === selectedId)
+
+  const { data: modalCustomer } = trpc.customers.getById.useQuery(
+    { id: customerModalId! },
+    { enabled: !!customerModalId }
+  )
 
   const handleSend = () => {
     if (!selectedId || !draft.trim()) return
@@ -210,13 +217,20 @@ export default function InboxPage() {
         ) : (
           <>
             {/* Thread header */}
-            <div className="border-b border-gray-200 bg-white px-5 py-3 flex items-center gap-3">
+            <div className="border-b border-gray-200 bg-white px-5 py-3 flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-gray-900">
                   {selected?.first_name} {selected?.last_name}
                 </p>
                 <p className="text-xs text-gray-400">{selected?.phone ?? ''}</p>
               </div>
+              <button
+                onClick={() => setCustomerModalId(selectedId)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                title="Open customer profile"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
             </div>
 
             {/* Messages */}
@@ -277,6 +291,14 @@ export default function InboxPage() {
           </>
         )}
       </div>
+
+      {customerModalId && modalCustomer && (
+        <CustomerModal
+          customer={modalCustomer}
+          onClose={() => setCustomerModalId(null)}
+          onSaved={() => { setCustomerModalId(null); utils.messages.inbox.invalidate() }}
+        />
+      )}
     </div>
   )
 }

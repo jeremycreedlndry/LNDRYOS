@@ -70,7 +70,8 @@ export async function POST(req: NextRequest) {
   } = body
 
   if (!order_id || !payment_token || !transaction_id) {
-    return NextResponse.json({ error: 'Missing params' }, { status: 400 })
+    console.error('[helcim-confirm] Missing params:', { order_id: !!order_id, payment_token: !!payment_token, transaction_id: transaction_id ?? '(null)' })
+    return NextResponse.json({ error: `Missing params: order_id=${!!order_id} token=${!!payment_token} txn=${!!transaction_id}` }, { status: 400 })
   }
 
   // Verify order + token

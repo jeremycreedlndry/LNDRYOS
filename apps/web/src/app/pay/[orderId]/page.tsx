@@ -118,13 +118,14 @@ export default function PayPage() {
       }
 
       if (eventStatus === 'SUCCESS') {
-        // Helcim event structure: eventMessage.data contains the transaction object
-        const txn = eventMessage?.data ?? eventMessage ?? {}
-        const transactionId  = txn.transactionId
-        const amountCents    = txn.amount ? Math.round(txn.amount * 100) : null
-        const cardToken      = txn.cardToken
-        const cardLast4      = txn.cardNumber   // F4L4 masked number
-        const cardBrand      = txn.cardType
+        // Helcim event structure: transactionId is top-level on eventMessage;
+        // card fields (cardToken, cardNumber, cardType) are nested under eventMessage.data
+        const msg            = eventMessage ?? {}
+        const transactionId  = msg.transactionId ?? msg.transaction?.transactionId ?? msg.data?.transactionId
+        const amountCents    = msg.amount ? Math.round(msg.amount * 100) : null
+        const cardToken      = msg.data?.cardToken  ?? msg.cardToken
+        const cardLast4      = msg.data?.cardNumber ?? msg.cardNumber   // F4L4 masked number
+        const cardBrand      = msg.data?.cardType   ?? msg.cardType
 
         // Confirm server-side
         const res = await fetch('/api/pay/helcim-confirm', {

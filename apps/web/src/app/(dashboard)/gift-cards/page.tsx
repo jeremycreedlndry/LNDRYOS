@@ -153,6 +153,14 @@ function LookupResultCard({ result, onLinked }: {
           <span className="text-2xl font-bold text-gray-900">{formatCurrency(card.balance_cents)}</span>
         </div>
 
+        {/* UID */}
+        {card.card_unique_identifier && (
+          <div className="flex items-center justify-between text-xs text-gray-400 px-1">
+            <span>UID</span>
+            <span className="font-mono">{card.card_unique_identifier}</span>
+          </div>
+        )}
+
         {/* Owner */}
         {customer ? (
           <div className="flex items-center gap-3 rounded-lg border border-gray-100 px-4 py-3">
@@ -317,8 +325,6 @@ export default function GiftCardsPage() {
     { enabled: !!lookupKey }
   )
 
-  const { data: allCards, refetch: refetchAll } = trpc.prepaidCards.listAll.useQuery()
-
   function handleLookup() {
     const num = cardNumber.trim()
     if (!num) return
@@ -328,7 +334,6 @@ export default function GiftCardsPage() {
   function handleLinked() {
     setLookupKey(null)
     setCardNumber('')
-    refetchAll()
     setTimeout(() => inputRef.current?.focus(), 100)
   }
 
@@ -436,49 +441,6 @@ export default function GiftCardsPage() {
         )}
       </div>
 
-      {/* All cards table */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700">All Cards ({allCards?.length ?? 0})</h2>
-        </div>
-        {!allCards || allCards.length === 0 ? (
-          <div className="px-5 py-10 text-center text-sm text-gray-400">No gift cards yet.</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Card #</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Balance</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Owner</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {allCards.map((card) => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const customer = (card as any).customer as { id: string; first_name: string; last_name: string } | null
-                return (
-                  <tr
-                    key={card.id}
-                    className="hover:bg-gray-50 cursor-pointer"
-                    onClick={() => { setSearchMode('card'); setCardNumber(card.card_display_number); setLookupKey(card.card_display_number) }}
-                  >
-                    <td className="px-5 py-3 font-mono font-medium text-gray-900">{card.card_display_number}</td>
-                    <td className="px-5 py-3 font-semibold text-gray-900">{formatCurrency(card.balance_cents)}</td>
-                    <td className="px-5 py-3">{statusPill(card.status ?? 'active')}</td>
-                    <td className="px-5 py-3 text-gray-600">
-                      {customer
-                        ? <span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-gray-400" />{customer.first_name} {customer.last_name}</span>
-                        : <span className="text-gray-400 italic">Unassigned</span>
-                      }
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
     </div>
   )
 }

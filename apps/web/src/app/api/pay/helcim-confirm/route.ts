@@ -69,9 +69,13 @@ export async function POST(req: NextRequest) {
     save_card,
   } = body
 
-  if (!order_id || !payment_token || !transaction_id) {
-    console.error('[helcim-confirm] Missing params:', { order_id: !!order_id, payment_token: !!payment_token, transaction_id: transaction_id ?? '(null)' })
-    return NextResponse.json({ error: `Missing params: order_id=${!!order_id} token=${!!payment_token} txn=${!!transaction_id}` }, { status: 400 })
+  if (!order_id || !payment_token) {
+    console.error('[helcim-confirm] Missing params:', { order_id: !!order_id, payment_token: !!payment_token })
+    return NextResponse.json({ error: `Missing params: order_id=${!!order_id} token=${!!payment_token}` }, { status: 400 })
+  }
+  // transaction_id is logged for audit but not required — its field name varies across Helcim event versions
+  if (!transaction_id) {
+    console.warn('[helcim-confirm] transaction_id missing — proceeding without it. Full body:', JSON.stringify(body))
   }
 
   // Verify order + token
@@ -95,7 +99,7 @@ export async function POST(req: NextRequest) {
     method:                'card_online',
     status:                'paid',
     processed_by:          'customer',
-    helcim_transaction_id: String(transaction_id),
+    helcim_transaction_id: transaction_id ? String(transaction_id) : null,
     card_last4:            card_last4 ?? null,
     card_brand:            card_brand ?? null,
   })

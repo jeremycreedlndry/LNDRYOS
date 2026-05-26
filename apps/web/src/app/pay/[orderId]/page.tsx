@@ -118,10 +118,17 @@ export default function PayPage() {
       }
 
       if (eventStatus === 'SUCCESS') {
+        // Log full event so we can inspect the exact structure in DevTools
+        console.log('[HelcimPay] SUCCESS eventMessage:', JSON.stringify(eventMessage, null, 2))
+
         // Helcim event structure: transactionId is top-level on eventMessage;
         // card fields (cardToken, cardNumber, cardType) are nested under eventMessage.data
         const msg            = eventMessage ?? {}
-        const transactionId  = msg.transactionId ?? msg.transaction?.transactionId ?? msg.data?.transactionId
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data           = (msg as any).data ?? msg
+        const transactionId  = msg.transactionId ?? msg.transaction?.transactionId
+          ?? data.transactionId ?? data.transaction?.transactionId
+          ?? data.helcimTransactionId ?? msg.helcimTransactionId
         const amountCents    = msg.amount ? Math.round(msg.amount * 100) : null
         const cardToken      = msg.data?.cardToken  ?? msg.cardToken
         const cardLast4      = msg.data?.cardNumber ?? msg.cardNumber   // F4L4 masked number

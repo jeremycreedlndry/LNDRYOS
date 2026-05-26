@@ -123,7 +123,6 @@ export default function DemoPage() {
             <OrderCart
               lines={cart}
               taxRate={0}
-              discountCents={0}
               onUpdateQuantity={(key, qty) => {
                 if (qty <= 0) setCart(p => p.filter(l => l.key !== key))
                 else setCart(p => p.map(l => l.key === key ? { ...l, quantity: qty } : l))

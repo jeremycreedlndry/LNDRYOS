@@ -187,7 +187,7 @@ function MobileCartSheet({ lines, taxRate, hasCustomer, isSubmitting, onUpdateQu
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-4">
-          <OrderCart lines={lines} taxRate={taxRate} discountCents={0} hasCustomer={hasCustomer}
+          <OrderCart lines={lines} taxRate={taxRate} hasCustomer={hasCustomer}
             onUpdateQuantity={onUpdateQuantity} onRemoveLine={onRemoveLine}
             onCheckout={onCheckout} isSubmitting={isSubmitting} />
         </div>
@@ -220,6 +220,13 @@ function POSInner() {
   const [customItemOpen, setCustomItemOpen] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const [showCancelModal, setShowCancelModal] = useState(false)
+  const [cartDiscountCents, setCartDiscountCents] = useState(0)
+  const [cartPromoCodeId, setCartPromoCodeId] = useState<string | undefined>()
+
+  const handleCartDiscountChange = (cents: number, promoCodeId?: string) => {
+    setCartDiscountCents(cents)
+    setCartPromoCodeId(promoCodeId)
+  }
 
   // Load existing order when in edit mode
   const { data: editOrder } = trpc.orders.getById.useQuery(
@@ -482,11 +489,13 @@ function POSInner() {
               )}
             </div>
           </div>
-          <OrderCart lines={cartLines} taxRate={taxRate} discountCents={0}
-            hasCustomer={!!customer} onUpdateQuantity={handleUpdateQty}
+          <OrderCart lines={cartLines} taxRate={taxRate}
+            hasCustomer={!!customer} customerId={customer?.id ?? null}
+            onUpdateQuantity={handleUpdateQty}
             onRemoveLine={(key) => setCartLines((prev) => prev.filter((l) => l.key !== key))}
             onCheckout={handleCheckout} isSubmitting={isSubmitting}
-            checkoutLabel={isEditMode ? 'Save Changes' : undefined} />
+            checkoutLabel={isEditMode ? 'Save Changes' : undefined}
+            onDiscountChange={handleCartDiscountChange} />
         </div>
       </div>
 
@@ -556,6 +565,7 @@ function POSInner() {
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
             <h2 className="mb-4 text-lg font-bold text-gray-900">Payment</h2>
             <PaymentModal orderId={paymentOrderId} totalCents={orderTotal}
+              discountCents={cartDiscountCents} promoCodeId={cartPromoCodeId}
               customer={customer}
               excludeMethods={[
                 // Can't pay for a gift card purchase with another gift card

@@ -886,7 +886,21 @@ export default function OrdersPage() {
             onViewDetail={(id) => setViewingOrderId(id)}
             onOpenIssues={(o) => setIssuesOrder(o)}
             onOpenPayment={(o) => setPaymentOrder(o)}
-            onPrintReceipt={(o) => printReceipt(o, tenantInfo)}
+            onPrintReceipt={(o) => {
+              toast.promise(
+                fetch('/api/print/receipt', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ order_id: o.id }),
+                }).then(async (r) => {
+                  if (!r.ok) {
+                    const j = await r.json().catch(() => ({}))
+                    throw new Error((j as { error?: string }).error ?? 'Print failed')
+                  }
+                }),
+                { loading: 'Printing…', success: 'Sent to printer', error: (e: Error) => e.message }
+              )
+            }}
           />
         ))}
       </div>

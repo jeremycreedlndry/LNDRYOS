@@ -241,7 +241,7 @@ export async function GET(
             </tr>
           </tbody>
         </table>
-        ${taxId ? `<div class="hst-reg">HST #: ${taxId}</div>` : ''}
+        ${taxId ? `<div class="hst-reg">${taxName} #: ${taxId}</div>` : ''}
       </div>
     </div>
 

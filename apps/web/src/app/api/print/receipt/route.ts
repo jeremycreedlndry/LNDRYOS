@@ -91,7 +91,8 @@ export async function POST(req: NextRequest) {
 
   const addr    = tenant?.address as Record<string, string> | null
   const taxName = (settings.tax_name as string | undefined) ?? 'HST'
-  const phone   = (settings.phone   as string | undefined) ?? ''
+  const taxId   = (settings.tax_id   as string | undefined) ?? ''
+  const phone   = (settings.phone    as string | undefined) ?? ''
 
   const customer = order.customer as { first_name: string; last_name: string; phone?: string | null; order_preferences?: Record<string,string> | null } | null
   const customerName = customer ? `${customer.first_name} ${customer.last_name}` : 'Walk-in'
@@ -153,6 +154,7 @@ export async function POST(req: NextRequest) {
   } else {
     push(twoCol('BALANCE DUE:', `$${(balance / 100).toFixed(2)}`))
   }
+  if (taxId) push(line(`${taxName} #: ${taxId}`))
 
   // Notes & prefs
   const prefs = customer?.order_preferences as Record<string, string> | null

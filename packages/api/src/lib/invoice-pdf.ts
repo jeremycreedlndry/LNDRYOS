@@ -180,7 +180,7 @@ function InvoiceDocument(d: InvoicePdfData) {
               el(Text, { style: s.grandKey }, 'Total'),
               el(Text, { style: s.grandVal }, fmt(d.totalCents)),
             ),
-            ...(d.taxId ? [el(Text, { style: s.taxReg }, `HST #: ${d.taxId}`)] : []),
+            ...(d.taxId ? [el(Text, { style: s.taxReg }, `${d.taxName} #: ${d.taxId}`)] : []),
           ),
         ),
       ),

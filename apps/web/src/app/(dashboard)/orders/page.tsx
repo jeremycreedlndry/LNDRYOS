@@ -38,7 +38,10 @@ interface OrderRow {
   order_number: string
   status: string
   payment_status: string
+  subtotal: number
+  tax_amount: number
   total_amount: number
+  paid_amount: number
   customer_name: string | null
   created_at: string
   due_date: string | null
@@ -137,77 +140,170 @@ function formatPreferences(prefs: Record<string, string> | null | undefined): st
 
 // ─── Print receipt ────────────────────────────────────────────────────────────
 
-function printReceipt(order: OrderRow, storeName: string) {
+interface TenantInfo {
+  name: string
+  phone?: string | null
+  address?: { street?: string; city?: string; province?: string; postal_code?: string } | null
+  taxName?: string
+}
+
+function printReceipt(order: OrderRow, tenant: TenantInfo) {
   const customerName = order.customer
     ? `${order.customer.first_name} ${order.customer.last_name}`
     : order.customer_name ?? 'Walk-in'
 
-  const lines = order.lines.filter((l) => l.category !== 'upcharge')
+  const bags = getBagCount(order.lines)
+  const pieces = getPieceCount(order.lines)
+  const countLabel = bags > 0
+    ? `${bags} Bag${bags > 1 ? 's' : ''}`
+    : pieces > 0
+    ? `${pieces} Piece${pieces > 1 ? 's' : ''}`
+    : ''
+
+  // Address lines
+  const addrLine1 = tenant.address?.street ?? ''
+  const addrLine2 = [tenant.address?.city, tenant.address?.postal_code].filter(Boolean).join(', ')
+  const storePhone = tenant.phone ?? ''
+
+  // Line items — group wash & fold bags, then show weight underneath
+  const mainLines = order.lines.filter((l) => l.category !== 'upcharge')
   const upcharges = order.lines.filter((l) => l.category === 'upcharge')
 
-  const lineRows = [...lines, ...upcharges].map((l) => `
-    <tr>
-      <td style="padding:2px 0;font-size:12px;">${l.name}</td>
-      <td style="padding:2px 0;font-size:12px;text-align:right;">${
-        l.unit_label === 'lb'
-          ? `${l.quantity % 1 === 0 ? l.quantity : l.quantity.toFixed(1)} lb`
-          : `× ${l.quantity}`
-      }</td>
-      <td style="padding:2px 0;font-size:12px;text-align:right;">$${(l.unit_price * l.quantity / 100).toFixed(2)}</td>
-    </tr>
-  `).join('')
+  const lineRowsHtml = [...mainLines, ...upcharges].map((l) => {
+    const isWashFold = l.category === 'wash_fold'
+    const qtyLabel = l.unit_label === 'lb'
+      ? `${l.quantity % 1 === 0 ? l.quantity : l.quantity.toFixed(2)}lb`
+      : `x ${l.quantity % 1 === 0 ? l.quantity : l.quantity.toFixed(1)}`
+    const lineTotal = `$${(l.unit_price * l.quantity / 100).toFixed(2)}`
+    const pricePerUnit = l.unit_label === 'lb'
+      ? `$${(l.unit_price / 100).toFixed(2)}/lb`
+      : ''
+
+    return `<tr>
+      <td style="padding:2px 0 0 0;font-size:12px;vertical-align:top;">
+        ${l.name}${pricePerUnit ? ` x ${l.quantity % 1 === 0 ? l.quantity : l.quantity.toFixed(2)}` : ''}<br/>
+        ${isWashFold ? `<span style="font-size:11px;color:#444;">${qtyLabel}</span>` : ''}
+      </td>
+      <td style="padding:2px 0 0 0;font-size:12px;text-align:right;vertical-align:top;white-space:nowrap;padding-left:8px;">${lineTotal}</td>
+    </tr>`
+  }).join('')
+
+  // Tax label
+  const taxName = tenant.taxName ?? 'TAX'
+  const balance = order.total_amount - (order.paid_amount ?? 0)
+  const isPaid = order.payment_status === 'paid'
+
+  // Due date formatted
+  const dueStr = order.due_date
+    ? new Date(order.due_date).toLocaleDateString('en-CA', { weekday: 'short', month: '2-digit', day: '2-digit' }).replace(',', '')
+    : null
+
+  // Preferences
+  const PREF_LABELS: Record<string, string> = {
+    bleach: 'Bleach', dryer_sheets: 'Dryer Sheets',
+    detergent_type: 'Detergent Type', fabric_softener: 'Fabric Softener',
+    wash_temperature: 'Wash Temperature',
+  }
+  const prefs = order.customer?.order_preferences as Record<string, string> | null
+  const prefLines = prefs
+    ? Object.entries(prefs).filter(([, v]) => v).map(([k, v]) => `${PREF_LABELS[k] ?? k}: ${v}`).join('<br/>')
+    : ''
+
+  const dropOff = new Date(order.created_at).toLocaleString('en-CA', {
+    month: '2-digit', day: '2-digit', year: '2-digit', hour: 'numeric', minute: '2-digit', hour12: false,
+  })
 
   const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Receipt — ${order.order_number}</title>
+  <title>Receipt ${order.order_number}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Courier New', monospace; width: 72mm; padding: 8px 4px; font-size: 12px; color: #000; }
+    body { font-family: 'Courier New', monospace; width: 72mm; padding: 6px 4px 16px 4px; font-size: 12px; color: #000; }
     .center { text-align: center; }
     .bold { font-weight: bold; }
-    .divider { border-top: 1px dashed #000; margin: 6px 0; }
+    .divider { border-top: 1px dashed #000; margin: 5px 0; }
     table { width: 100%; border-collapse: collapse; }
-    .total-row td { font-weight: bold; font-size: 13px; padding-top: 4px; }
-    @media print { @page { margin: 0; size: 72mm auto; } }
+    @media print { @page { margin: 0; size: 72mm auto; } body { padding-bottom: 24px; } }
   </style>
 </head>
 <body>
-  <div class="center bold" style="font-size:15px;margin-bottom:2px;">${storeName}</div>
-  <div class="center" style="font-size:11px;margin-bottom:6px;">${new Date(order.created_at).toLocaleDateString('en-CA', { year:'numeric', month:'short', day:'numeric' })}</div>
+  <!-- Header -->
+  <div class="center" style="font-size:11px;margin-bottom:3px;">*** Customer Copy ***</div>
+  <div class="center bold" style="font-size:14px;">${order.order_number}</div>
+  ${countLabel ? `<div class="center" style="font-size:12px;margin-bottom:4px;">${countLabel}</div>` : ''}
+
+  <!-- Store info -->
+  <div class="center bold" style="font-size:14px;margin-top:4px;">${tenant.name}</div>
+  ${addrLine1 ? `<div class="center" style="font-size:11px;">${addrLine1}</div>` : ''}
+  ${addrLine2 ? `<div class="center" style="font-size:11px;">${addrLine2}</div>` : ''}
+  ${storePhone ? `<div class="center" style="font-size:11px;">Tel: ${storePhone}</div>` : ''}
+
   <div class="divider"></div>
-  <div style="margin-bottom:4px;">
-    <span class="bold">Order:</span> ${order.order_number}<br/>
-    <span class="bold">Customer:</span> ${customerName}
-  </div>
+
+  <!-- Customer -->
+  <div class="center bold" style="font-size:14px;">${customerName}</div>
+  ${order.customer?.phone ? `<div class="center" style="font-size:11px;margin-top:2px;">${order.customer.phone}</div>` : ''}
+
   <div class="divider"></div>
-  <table>
-    <tbody>${lineRows}</tbody>
-  </table>
+
+  <!-- Line items -->
+  <table><tbody>${lineRowsHtml}</tbody></table>
+
   <div class="divider"></div>
-  <table>
-    <tbody>
-      <tr class="total-row">
-        <td>TOTAL</td>
-        <td></td>
-        <td style="text-align:right;">$${(order.total_amount / 100).toFixed(2)}</td>
-      </tr>
-      <tr>
-        <td colspan="3" style="font-size:11px;padding-top:2px;text-align:right;">
-          ${order.payment_status === 'paid' ? '✓ PAID' : 'BALANCE DUE'}
-        </td>
-      </tr>
-    </tbody>
-  </table>
+
+  <!-- Totals -->
+  <table><tbody>
+    <tr>
+      <td style="font-size:12px;">SUBTOTAL:</td>
+      <td style="font-size:12px;text-align:right;">$${(order.subtotal / 100).toFixed(2)}</td>
+    </tr>
+    <tr>
+      <td style="font-size:12px;">${taxName}:</td>
+      <td style="font-size:12px;text-align:right;">$${(order.tax_amount / 100).toFixed(2)}</td>
+    </tr>
+    <tr>
+      <td style="font-size:13px;font-weight:bold;padding-top:2px;">TOTAL:</td>
+      <td style="font-size:13px;font-weight:bold;text-align:right;padding-top:2px;">$${(order.total_amount / 100).toFixed(2)}</td>
+    </tr>
+    ${!isPaid ? `<tr>
+      <td style="font-size:12px;">BALANCE DUE:</td>
+      <td style="font-size:12px;text-align:right;">$${(balance / 100).toFixed(2)}</td>
+    </tr>` : `<tr>
+      <td colspan="2" style="font-size:12px;text-align:right;padding-top:2px;">✓ PAID</td>
+    </tr>`}
+  </tbody></table>
+
   <div class="divider"></div>
-  <div class="center" style="font-size:11px;margin-top:4px;">Thank you!</div>
-  <script>window.onload = () => { window.print(); window.onafterprint = () => window.close(); }</script>
+
+  <!-- Notes & preferences -->
+  ${order.notes ? `<div style="font-size:11px;margin-bottom:3px;">Notes: ${order.notes}</div>` : ''}
+  ${prefLines ? `<div style="font-size:11px;margin-bottom:3px;">${prefLines}</div>` : ''}
+
+  <!-- Drop-off -->
+  <div style="font-size:11px;margin-bottom:4px;">Dropped Off: ${dropOff}</div>
+
+  <!-- Ready date — large -->
+  ${dueStr ? `<div class="divider"></div>
+  <div class="center bold" style="font-size:18px;margin:6px 0;">Ready: ${dueStr}</div>` : ''}
+
+  <div class="divider"></div>
+  <div class="center" style="font-size:11px;margin-top:4px;">Thank you for your business!</div>
 </body>
 </html>`
 
-  const w = window.open('', '_blank', 'width=320,height=500')
-  if (w) { w.document.write(html); w.document.close() }
+  // Print via hidden iframe — no popup
+  const existing = document.getElementById('__print_frame__')
+  if (existing) existing.remove()
+  const iframe = document.createElement('iframe')
+  iframe.id = '__print_frame__'
+  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0;'
+  document.body.appendChild(iframe)
+  const doc = iframe.contentDocument ?? iframe.contentWindow?.document
+  if (!doc) return
+  doc.open(); doc.write(html); doc.close()
+  iframe.onload = () => { iframe.contentWindow?.print() }
 }
 
 // ─── Progress pill ────────────────────────────────────────────────────────────
@@ -728,7 +824,12 @@ export default function OrdersPage() {
   const [paymentOrder, setPaymentOrder] = useState<OrderRow | null>(null)
 
   const { data: tenant } = trpc.tenants.getCurrent.useQuery()
-  const storeName = tenant?.name ?? 'Laundry'
+  const tenantInfo: TenantInfo = {
+    name:    tenant?.name ?? 'Laundry',
+    phone:   (tenant?.settings as Record<string, string> | null)?.phone ?? null,
+    address: tenant?.address as TenantInfo['address'] ?? null,
+    taxName: (tenant?.settings as Record<string, string> | null)?.tax_name ?? 'HST',
+  }
 
   const { data: orders = [], isLoading } = trpc.orders.list.useQuery(
     activeFilter.value
@@ -785,7 +886,7 @@ export default function OrdersPage() {
             onViewDetail={(id) => setViewingOrderId(id)}
             onOpenIssues={(o) => setIssuesOrder(o)}
             onOpenPayment={(o) => setPaymentOrder(o)}
-            onPrintReceipt={(o) => printReceipt(o, storeName)}
+            onPrintReceipt={(o) => printReceipt(o, tenantInfo)}
           />
         ))}
       </div>

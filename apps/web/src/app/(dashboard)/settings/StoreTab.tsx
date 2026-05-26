@@ -144,6 +144,9 @@ export function StoreTab() {
   const [taxRate, setTaxRate] = useState('')
   const [taxId, setTaxId] = useState('')
 
+  // Order defaults
+  const [defaultDueDays, setDefaultDueDays] = useState<string>('2')
+
   // Payments
   const [defaultPaymentType, setDefaultPaymentType] = useState<string>('saved_card')
 
@@ -163,6 +166,7 @@ export function StoreTab() {
     setOffersPickupDelivery(s?.offers_pickup_delivery ?? false)
     setOffersWashFold(s?.offers_wash_fold ?? true)
     setHours(s?.hours ?? DEFAULT_HOURS)
+    setDefaultDueDays(String(s?.default_due_days ?? 2))
     setDefaultPaymentType(s?.default_payment_type ?? 'saved_card')
 
     if (a) {
@@ -205,6 +209,7 @@ export function StoreTab() {
         offers_pickup_delivery: offersPickupDelivery,
         offers_wash_fold: offersWashFold,
         hours,
+        default_due_days: parseInt(defaultDueDays, 10) || 2,
         default_payment_type: defaultPaymentType as 'saved_card' | 'card_terminal' | 'pay_on_collection' | 'cash' | 'direct_deposit' | 'invoice',
       },
     })
@@ -388,6 +393,28 @@ export function StoreTab() {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Tax registration number</label>
           <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="123456789 RT0001" />
+        </div>
+      </Section>
+
+      {/* D. Order Defaults */}
+      <Section title="Order Defaults">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Ready by default</label>
+          <p className="text-xs text-gray-500 mb-2">Sets the default "Ready by" date when creating a new order.</p>
+          <select
+            value={defaultDueDays}
+            onChange={(e) => setDefaultDueDays(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="0">Same day</option>
+            <option value="1">Next day (+1 day)</option>
+            <option value="2">+2 days</option>
+            <option value="3">+3 days</option>
+            <option value="4">+4 days</option>
+            <option value="5">+5 days</option>
+            <option value="7">+1 week</option>
+            <option value="14">+2 weeks</option>
+          </select>
         </div>
       </Section>
 

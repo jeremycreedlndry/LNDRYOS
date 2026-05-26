@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X, MapPin } from 'lucide-react'
+import { X, MapPin, UserPlus, ArrowLeft } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import toast from 'react-hot-toast'
 import { useDebounce } from '@/hooks/useDebounce'
@@ -38,16 +38,42 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
   const [addressRaw, setAddressRaw] = useState('')
   const [addressFields, setAddressFields] = useState<AddressFields | null>(null)
 
+  // New customer inline form
+  const [creatingCustomer, setCreatingCustomer] = useState(false)
+  const [newCustomer, setNewCustomer] = useState({ first_name: '', last_name: '', phone: '' })
+  const setNC = (k: keyof typeof newCustomer, v: string) => setNewCustomer((f) => ({ ...f, [k]: v }))
+
   const needsAddress = !!selectedCustomer && !selectedCustomer.address_street
 
   const selectCustomer = (c: CustomerStub) => {
     setSelectedCustomer(c)
+    setCreatingCustomer(false)
+    setSearch('')
     setAddressRaw('')
     setAddressFields(null)
     if (c.driver_instructions) set('notes', c.driver_instructions)
   }
 
   const updateCustomer = trpc.customers.update.useMutation()
+
+  const createCustomer = trpc.customers.create.useMutation({
+    onSuccess: (c) => {
+      utils.customers.list.invalidate()
+      selectCustomer(c as unknown as CustomerStub)
+      toast.success(`${c.first_name} ${c.last_name} created`)
+    },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const handleCreateCustomer = () => {
+    if (!newCustomer.first_name.trim()) { toast.error('First name required'); return }
+    if (!newCustomer.phone.trim()) { toast.error('Phone number required'); return }
+    createCustomer.mutate({
+      first_name: newCustomer.first_name.trim(),
+      last_name: newCustomer.last_name.trim(),
+      phone: newCustomer.phone.trim(),
+    })
+  }
 
   const [form, setForm] = useState({
     frequency: 'weekly' as 'once' | 'weekly' | 'biweekly' | 'monthly',
@@ -120,7 +146,7 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
                 <div>
                   <p className="font-medium text-gray-900">{selectedCustomer.first_name} {selectedCustomer.last_name}</p>
                   <p className="text-xs text-gray-500">
-                    {[selectedCustomer.address_street, selectedCustomer.address_city].filter(Boolean).join(', ')}
+                    {[selectedCustomer.phone, selectedCustomer.address_street, selectedCustomer.address_city].filter(Boolean).join(' · ')}
                   </p>
                 </div>
                 {!initialCustomer && (
@@ -129,23 +155,78 @@ export function ScheduleModal({ onClose, onSaved, initialCustomer }: Props) {
                   </button>
                 )}
               </div>
+            ) : creatingCustomer ? (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <button onClick={() => setCreatingCustomer(false)} className="text-gray-400 hover:text-gray-600">
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  <span className="text-sm font-semibold text-gray-700">New Customer</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    value={newCustomer.first_name}
+                    onChange={(e) => setNC('first_name', e.target.value)}
+                    placeholder="First name *"
+                    autoFocus
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
+                  />
+                  <input
+                    value={newCustomer.last_name}
+                    onChange={(e) => setNC('last_name', e.target.value)}
+                    placeholder="Last name"
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
+                  />
+                </div>
+                <input
+                  type="tel"
+                  value={newCustomer.phone}
+                  onChange={(e) => setNC('phone', e.target.value)}
+                  placeholder="Phone number *"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreateCustomer() }}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
+                />
+                <button
+                  onClick={handleCreateCustomer}
+                  disabled={createCustomer.isPending}
+                  className="w-full rounded-xl bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40"
+                >
+                  {createCustomer.isPending ? 'Creating…' : 'Create Customer'}
+                </button>
+              </div>
             ) : (
               <div className="relative">
                 <input value={search} onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by name or phone…" autoFocus
                   className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-brand-400 focus:outline-none" />
                 {debouncedSearch.length >= 2 && (
-                  <div className="absolute z-10 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg max-h-48 overflow-y-auto">
+                  <div className="absolute z-10 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg max-h-56 overflow-y-auto">
                     {(searchResults as CustomerStub[]).map((c) => (
-                      <button key={c.id} onClick={() => { selectCustomer(c); setSearch('') }}
+                      <button key={c.id} onClick={() => selectCustomer(c)}
                         className="flex w-full flex-col px-4 py-2.5 text-left hover:bg-gray-50">
                         <span className="text-sm font-medium text-gray-900">{c.first_name} {c.last_name}</span>
                         <span className="text-xs text-gray-500">{c.phone}{c.address_street ? ` · ${c.address_street}` : ''}</span>
                       </button>
                     ))}
-                    {searchResults.length === 0 && <p className="px-4 py-3 text-sm text-gray-400">No customers found</p>}
+                    {searchResults.length === 0 && (
+                      <div className="px-4 py-3">
+                        <p className="text-sm text-gray-400 mb-2">No customers found</p>
+                        <button
+                          onClick={() => { setCreatingCustomer(true); setNewCustomer({ first_name: '', last_name: '', phone: search }) }}
+                          className="flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700"
+                        >
+                          <UserPlus className="h-4 w-4" /> Create new customer
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
+                <button
+                  onClick={() => setCreatingCustomer(true)}
+                  className="mt-2 flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700"
+                >
+                  <UserPlus className="h-3.5 w-3.5" /> New customer
+                </button>
               </div>
             )}
           </div>

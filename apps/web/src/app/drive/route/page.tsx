@@ -17,6 +17,20 @@ function isoToday() {
   return new Date().toISOString().split('T')[0]
 }
 
+function isoOffset(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  return d.toISOString().split('T')[0]
+}
+
+function fmtDateLabel(iso: string): string {
+  const today = isoToday()
+  const tomorrow = isoOffset(1)
+  if (iso === today) return 'Today'
+  if (iso === tomorrow) return 'Tomorrow'
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
 type Stop = {
   id: string
   type: string
@@ -107,17 +121,19 @@ function RouteInner() {
   const zoneParam = params.get('zones') ?? ''
   const zoneIds = zoneParam ? zoneParam.split(',').filter(id => id !== 'unassigned') : []
   const today = isoToday()
+  const tomorrow = isoOffset(1)
 
   const [menuOpen, setMenuOpen] = useState(false)
+  const [selectedDate, setSelectedDate] = useState(today)
 
   const { data: me } = trpc.staff.myRole.useQuery()
   const { data: stops, isLoading, refetch } = trpc.pickupStops.listForDriver.useQuery({
     zone_ids: zoneIds,
-    date: today,
+    date: selectedDate,
   }, { refetchInterval: 30_000 }) // auto-refresh every 30s
 
   const pastDue = stops?.pastDue ?? []
-  const todayStops = stops?.today ?? []
+  const dateStops = stops?.today ?? []
   const currentUserId = me?.userId ?? ''
 
   const zoneName = zoneParam
@@ -128,17 +144,43 @@ function RouteInner() {
     <div className="flex flex-col min-h-screen">
 
       {/* Header */}
-      <div className="bg-brand-600 text-white px-4 pt-12 pb-3 safe-top flex items-center gap-3">
-        <button onClick={() => setMenuOpen(true)} className="p-1">
-          <Menu className="h-6 w-6" />
-        </button>
-        <button onClick={() => router.push('/drive')} className="flex-1 text-left">
-          <span className="font-bold text-base">{zoneName}</span>
-          <span className="text-brand-200 text-xs ml-2">▾</span>
-        </button>
-        <span className="text-xs text-brand-200">
-          {new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
-        </span>
+      <div className="bg-brand-600 text-white px-4 pt-12 pb-3 safe-top">
+        <div className="flex items-center gap-3 mb-3">
+          <button onClick={() => setMenuOpen(true)} className="p-1">
+            <Menu className="h-6 w-6" />
+          </button>
+          <button onClick={() => router.push('/drive')} className="flex-1 text-left">
+            <span className="font-bold text-base">{zoneName}</span>
+            <span className="text-brand-200 text-xs ml-2">▾</span>
+          </button>
+          <span className="text-xs text-brand-200">{fmtDateLabel(selectedDate)}</span>
+        </div>
+        {/* Date selector pills */}
+        <div className="flex gap-2">
+          {[
+            { label: 'Past Due', value: 'past' },
+            { label: 'Today', value: today },
+            { label: 'Tomorrow', value: tomorrow },
+          ].map(({ label, value }) => (
+            <button
+              key={value}
+              onClick={() => setSelectedDate(value === 'past' ? isoOffset(-1) : value)}
+              className={cn(
+                'flex-1 rounded-full py-1.5 text-xs font-semibold transition-colors',
+                (value === 'past' ? selectedDate < today : selectedDate === value)
+                  ? 'bg-white text-brand-700'
+                  : 'bg-brand-500 text-white'
+              )}
+            >
+              {label}
+              {value === 'past' && pastDue.length > 0 && selectedDate >= today && (
+                <span className="ml-1 bg-amber-400 text-amber-900 rounded-full px-1.5 text-[10px]">
+                  {pastDue.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Body */}
@@ -147,8 +189,8 @@ function RouteInner() {
           <div className="p-8 text-center text-gray-400 text-sm">Loading stops…</div>
         ) : (
           <>
-            {/* Past due */}
-            {pastDue.length > 0 && (
+            {/* Past due section — only show when viewing today */}
+            {selectedDate === today && pastDue.length > 0 && (
               <>
                 <div className="px-4 py-2 bg-amber-50 border-b border-amber-100">
                   <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Past Due</span>
@@ -160,19 +202,28 @@ function RouteInner() {
               </>
             )}
 
-            {/* Today */}
-            {todayStops.length === 0 && pastDue.length === 0 ? (
+            {/* Selected date stops */}
+            {dateStops.length === 0 && (selectedDate !== today || pastDue.length === 0) ? (
               <div className="p-12 text-center">
-                <p className="text-gray-400 text-sm">No stops for today.</p>
+                <p className="text-gray-400 text-sm">No stops for {fmtDateLabel(selectedDate).toLowerCase()}.</p>
                 <button onClick={() => refetch()} className="mt-3 text-brand-600 text-sm font-medium">
                   Refresh
                 </button>
               </div>
             ) : (
-              todayStops.map(stop => (
-                <StopRow key={stop.id} stop={stop as Stop} currentUserId={currentUserId}
-                  onPress={() => router.push(`/drive/stop/${stop.id}${zoneParam ? `?zones=${zoneParam}` : ''}`)} />
-              ))
+              <>
+                {dateStops.length > 0 && (
+                  <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      {fmtDateLabel(selectedDate)} · {dateStops.length} stop{dateStops.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                )}
+                {dateStops.map(stop => (
+                  <StopRow key={stop.id} stop={stop as Stop} currentUserId={currentUserId}
+                    onPress={() => router.push(`/drive/stop/${stop.id}${zoneParam ? `?zones=${zoneParam}` : ''}`)} />
+                ))}
+              </>
             )}
           </>
         )}

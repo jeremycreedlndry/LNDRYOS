@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { createServerClient } from '@/lib/supabase-server'
 import { createSupabaseServiceClient } from '@laundry/db'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -12,19 +13,28 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect('/login')
 
+  const cookieStore = await cookies()
+  const tenantIdFromCookie = cookieStore.get('tenant_id')?.value
+
   // Use service client to bypass RLS for tenant lookup
   const service = createSupabaseServiceClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  const { data: member } = await service
+  // Prefer the tenant_id cookie (same one tRPC uses) so the name stays in sync
+  let query = service
     .from('tenant_members')
     .select('tenant_id, role, tenants(name, slug, status)')
     .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+
+  if (tenantIdFromCookie) {
+    query = query.eq('tenant_id', tenantIdFromCookie)
+  } else {
+    query = query.order('created_at', { ascending: false })
+  }
+
+  const { data: member } = await query.limit(1).maybeSingle()
 
   if (!member) redirect('/onboarding')
 

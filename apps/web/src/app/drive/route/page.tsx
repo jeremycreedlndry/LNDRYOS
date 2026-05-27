@@ -155,31 +155,37 @@ function RouteInner() {
           </button>
           <span className="text-xs text-brand-200">{fmtDateLabel(selectedDate)}</span>
         </div>
-        {/* Date selector pills */}
-        <div className="flex gap-2">
+        {/* Date selector */}
+        <div className="flex items-center gap-2">
+          {/* Quick pills */}
           {[
-            { label: 'Past Due', value: 'past' },
+            { label: 'Past Due', value: isoOffset(-1) },
             { label: 'Today', value: today },
             { label: 'Tomorrow', value: tomorrow },
           ].map(({ label, value }) => (
             <button
               key={value}
-              onClick={() => setSelectedDate(value === 'past' ? isoOffset(-1) : value)}
+              onClick={() => setSelectedDate(value)}
               className={cn(
-                'flex-1 rounded-full py-1.5 text-xs font-semibold transition-colors',
-                (value === 'past' ? selectedDate < today : selectedDate === value)
-                  ? 'bg-white text-brand-700'
-                  : 'bg-brand-500 text-white'
+                'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap',
+                selectedDate === value ? 'bg-white text-brand-700' : 'bg-brand-500 text-white'
               )}
             >
               {label}
-              {value === 'past' && pastDue.length > 0 && selectedDate >= today && (
+              {label === 'Past Due' && pastDue.length > 0 && selectedDate >= today && (
                 <span className="ml-1 bg-amber-400 text-amber-900 rounded-full px-1.5 text-[10px]">
                   {pastDue.length}
                 </span>
               )}
             </button>
           ))}
+          {/* Full date picker */}
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={e => e.target.value && setSelectedDate(e.target.value)}
+            className="flex-1 min-w-0 rounded-full bg-brand-500 text-white text-xs font-semibold px-3 py-1.5 border-none focus:outline-none focus:ring-2 focus:ring-white [color-scheme:dark]"
+          />
         </div>
       </div>
 

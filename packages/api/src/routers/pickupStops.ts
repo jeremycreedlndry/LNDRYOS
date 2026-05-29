@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, tenantProcedure } from '../trpc'
 import { sendSms, logMessage } from '../lib/sms'
-import { sendEmail, emailLayout } from '../lib/email'
+import { sendEmail, emailLayout, bookingDeclinedEmail, APP_URL } from '../lib/email'
 
 export const pickupStopsRouter = router({
   listByDate: tenantProcedure
@@ -60,6 +60,118 @@ export const pickupStopsRouter = router({
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
       return data ?? []
+    }),
+
+  // ── All pending customer-app requests (any date, not yet approved/skipped) ───
+  // Used to surface new bookings in the LNDRYOS Pickups page regardless of which
+  // date the staff member is currently viewing.
+  listPendingRequests: tenantProcedure
+    .query(async ({ ctx }) => {
+      const { data, error } = await ctx.supabase
+        .from('pickup_stops')
+        .select(`
+          *,
+          customer:customers(id, first_name, last_name, phone, address_street, address_city, address_postal_code, driver_instructions),
+          order:orders(id, order_number, status, notes)
+        `)
+        .eq('tenant_id', ctx.tenantId)
+        .eq('source', 'customer_app')
+        .is('approved_at', null)
+        .neq('status', 'skipped')
+        .order('scheduled_date')
+        .order('time_start')
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return data ?? []
+    }),
+
+  // ── Approve a customer-app stop request ──────────────────────────────────────
+  approveStop: tenantProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { error } = await ctx.supabase
+        .from('pickup_stops')
+        .update({
+          approved_at: new Date().toISOString(),
+          approved_by: ctx.userId,
+        })
+        .eq('id', input.id)
+        .eq('tenant_id', ctx.tenantId)
+        .eq('source', 'customer_app')
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return { success: true }
+    }),
+
+  // ── Decline a customer-app stop request (marks as skipped + cancels order + emails customer) ──
+  declineStop: tenantProcedure
+    .input(z.object({ id: z.string().uuid(), reason: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Get the stop with scheduling info for the email
+      const { data: stop } = await ctx.supabase
+        .from('pickup_stops')
+        .select('id, order_id, source, scheduled_date, time_start, time_end')
+        .eq('id', input.id)
+        .eq('tenant_id', ctx.tenantId)
+        .maybeSingle()
+
+      if (!stop) throw new TRPCError({ code: 'NOT_FOUND' })
+
+      // Mark all stops for this order as skipped
+      if (stop.order_id) {
+        await ctx.supabase
+          .from('pickup_stops')
+          .update({ status: 'skipped' })
+          .eq('order_id', stop.order_id)
+          .eq('tenant_id', ctx.tenantId)
+
+        await ctx.supabase
+          .from('orders')
+          .update({ status: 'cancelled' })
+          .eq('id', stop.order_id)
+          .eq('tenant_id', ctx.tenantId)
+      } else {
+        await ctx.supabase
+          .from('pickup_stops')
+          .update({ status: 'skipped' })
+          .eq('id', input.id)
+          .eq('tenant_id', ctx.tenantId)
+      }
+
+      // Email customer — fire and forget
+      sendDeclineNotification(ctx.supabase, ctx.tenantId, stop, input.reason).catch(console.error)
+
+      return { success: true }
+    }),
+
+  // ── Edit a stop (date / time / notes / zone) ─────────────────────────────────
+  patchStop: tenantProcedure
+    .input(z.object({
+      id:             z.string().uuid(),
+      scheduled_date: z.string().optional(),
+      time_start:     z.string().nullable().optional(),
+      time_end:       z.string().nullable().optional(),
+      notes:          z.string().nullable().optional(),
+      zone_id:        z.string().uuid().nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...rest } = input
+      const patch: Record<string, unknown> = {}
+      if (rest.scheduled_date !== undefined) patch.scheduled_date = rest.scheduled_date
+      if (rest.time_start !== undefined) patch.time_start = rest.time_start || null
+      if (rest.time_end !== undefined) patch.time_end = rest.time_end || null
+      if (rest.notes !== undefined) patch.notes = rest.notes || null
+      if (rest.zone_id !== undefined) patch.zone_id = rest.zone_id
+
+      const { data, error } = await ctx.supabase
+        .from('pickup_stops')
+        .update(patch)
+        .eq('id', id)
+        .eq('tenant_id', ctx.tenantId)
+        .select()
+        .single()
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return data
     }),
 
   assignDriver: tenantProcedure
@@ -178,13 +290,14 @@ export const pickupStopsRouter = router({
         zone:delivery_zones(id, name, color),
         order:orders(id, order_number, status, payment_status, total_amount, paid_amount)
       `
-      // Today's stops
+      // Today's stops — exclude unapproved customer_app requests
       let todayQ = ctx.supabase
         .from('pickup_stops')
         .select(select)
         .eq('tenant_id', ctx.tenantId)
         .eq('scheduled_date', input.date)
         .not('status', 'in', '("completed","skipped")')
+        .or('source.eq.staff,approved_at.not.is.null')
         .order('time_start', { nullsFirst: false })
         .order('sequence_order')
 
@@ -199,6 +312,7 @@ export const pickupStopsRouter = router({
         .eq('tenant_id', ctx.tenantId)
         .lt('scheduled_date', input.date)
         .not('status', 'in', '("completed","skipped")')
+        .or('source.eq.staff,approved_at.not.is.null')
         .order('scheduled_date', { ascending: false })
         .order('time_start', { nullsFirst: false })
 
@@ -243,6 +357,12 @@ export const pickupStopsRouter = router({
         .single()
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+
+      // Notify customer — driver is on the way
+      if (data.customer_id) {
+        sendEnRouteNotification(ctx.supabase, ctx.tenantId, data).catch(console.error)
+      }
+
       return data
     }),
 
@@ -322,6 +442,63 @@ export const pickupStopsRouter = router({
     }),
 })
 
+// ─── Decline notification ────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function sendDeclineNotification(supabase: any, tenantId: string, stop: any, reason: string) {
+  if (!stop.order_id) return
+
+  // Get customer_id from the order
+  const { data: order } = await supabase
+    .from('orders')
+    .select('customer_id')
+    .eq('id', stop.order_id)
+    .maybeSingle()
+  if (!order?.customer_id) return
+
+  // Get customer
+  const { data: customer } = await supabase
+    .from('customers')
+    .select('first_name, email')
+    .eq('id', order.customer_id)
+    .maybeSingle()
+  if (!customer?.email) return
+
+  // Get tenant
+  const { data: tenant } = await supabase
+    .from('tenants')
+    .select('name, settings')
+    .eq('id', tenantId)
+    .maybeSingle()
+
+  const storeName: string = tenant?.name ?? 'Your laundry service'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const storePhone: string | null = (tenant?.settings as any)?.phone ?? null
+
+  // Format date and time window for the email
+  const scheduledDate = stop.scheduled_date
+    ? new Date(stop.scheduled_date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' })
+    : ''
+  const fmtT = (t: string) => {
+    const [h, m] = t.split(':').map(Number)
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`
+  }
+  const timeWindow: string | null = stop.time_start
+    ? `${fmtT(stop.time_start)}${stop.time_end ? `–${fmtT(stop.time_end)}` : ''}`
+    : null
+
+  const { subject, html } = bookingDeclinedEmail({
+    storeName,
+    storePhone,
+    customerName: customer.first_name,
+    scheduledDate,
+    timeWindow,
+    reason,
+  })
+
+  await sendEmail({ to: customer.email, subject, html })
+}
+
 // ─── On pickup completion: ensure order exists and is set to "Detail" (pending) ──
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -337,15 +514,21 @@ async function ensurePickupOrderDetail(supabase: any, tenantId: string, stop: an
     return
   }
 
-  // No order yet — check if the schedule wants auto-creation
-  if (!stop.schedule_id) return
-  const { data: schedule } = await supabase
-    .from('pickup_schedules')
-    .select('auto_create_order, customer_id')
-    .eq('id', stop.schedule_id)
-    .eq('tenant_id', tenantId)
-    .maybeSingle()
-  if (!schedule?.auto_create_order) return
+  // No order yet — create one if we have a customer
+  // (schedule_id is optional — one-off pickup stops also need detail orders)
+  const customerId = stop.customer_id
+  if (!customerId) return
+
+  // If from a schedule, respect the auto_create_order flag
+  if (stop.schedule_id) {
+    const { data: schedule } = await supabase
+      .from('pickup_schedules')
+      .select('auto_create_order')
+      .eq('id', stop.schedule_id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (!schedule?.auto_create_order) return
+  }
 
   // Generate next order number
   const { data: lastOrder } = await supabase
@@ -363,18 +546,21 @@ async function ensurePickupOrderDetail(supabase: any, tenantId: string, stop: an
   }
   const orderNumber = `ORD-${String(nextNum).padStart(5, '0')}`
 
+  const deliveryFee = await resolveDeliveryFee(supabase, tenantId, customerId)
+
   const { data: order } = await supabase
     .from('orders')
     .insert({
       tenant_id: tenantId,
       order_number: orderNumber,
-      customer_id: stop.customer_id ?? schedule.customer_id,
+      customer_id: customerId,  // already resolved above
       status: 'pending',
       due_date: stop.scheduled_date ?? null,
       subtotal: 0,
       tax_amount: 0,
       discount_amount: 0,
-      total_amount: 0,
+      delivery_fee_cents: deliveryFee,
+      total_amount: deliveryFee,  // starts with just the delivery fee
     })
     .select('id')
     .single()
@@ -387,6 +573,31 @@ async function ensurePickupOrderDetail(supabase: any, tenantId: string, stop: an
       .eq('id', stop.id)
       .eq('tenant_id', tenantId)
   }
+}
+
+// ─── Resolve effective delivery fee for a customer ────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function resolveDeliveryFee(supabase: any, tenantId: string, customerId: string | null): Promise<number> {
+  if (!customerId) return 0
+
+  // 1. Customer override
+  const { data: customer } = await supabase
+    .from('customers')
+    .select('delivery_fee_cents')
+    .eq('id', customerId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (customer?.delivery_fee_cents != null) return customer.delivery_fee_cents
+
+  // 2. Tenant default
+  const { data: tenant } = await supabase
+    .from('tenants')
+    .select('settings')
+    .eq('id', tenantId)
+    .maybeSingle()
+
+  return (tenant?.settings as Record<string, unknown>)?.delivery_fee_cents as number ?? 0
 }
 
 // ─── En-route notification (fire-and-forget) ──────────────────────────────────
@@ -409,9 +620,10 @@ async function sendEnRouteNotification(supabase: any, tenantId: string, stop: an
 
   const action = stop.type === 'delivery' ? 'deliver your laundry' : 'pick up your laundry'
   const actionShort = stop.type === 'delivery' ? 'delivery' : 'pickup'
+  const trackingUrl = `${APP_URL}/track/${stop.id}`
 
   if ((pref === 'sms' || pref === 'sms_email') && customer.phone) {
-    const body = `${storeName}: Your driver is on the way to ${action}! They should arrive shortly.`
+    const body = `${storeName}: Your driver is on the way to ${action}! Track them here: ${trackingUrl}`
     await sendSms(customer.phone, body)
     await logMessage(supabase, {
       tenant_id: tenantId,
@@ -428,6 +640,11 @@ async function sendEnRouteNotification(supabase: any, tenantId: string, stop: an
     const html = emailLayout(storeName, `
       <p>Hi ${customer.first_name},</p>
       <p>Your driver is <strong>on the way</strong> to ${action}. They should arrive shortly — please make sure your laundry is ready and accessible.</p>
+      <p style="margin:20px 0">
+        <a href="${trackingUrl}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;font-weight:600;padding:10px 24px;border-radius:8px;font-size:14px">
+          Track Your Driver →
+        </a>
+      </p>
       ${storePhone ? `<p style="font-size:13px;color:#6b7280">Questions? Call us at ${storePhone}</p>` : ''}
     `)
     await sendEmail({ to: customer.email, subject, html })
@@ -436,7 +653,7 @@ async function sendEnRouteNotification(supabase: any, tenantId: string, stop: an
       customer_id: stop.customer_id,
       direction: 'outbound',
       channel: 'email',
-      body: `Your driver is on the way to ${action}.`,
+      body: `Your driver is on the way to ${action}. Track: ${trackingUrl}`,
       subject,
       to_address: customer.email,
     })

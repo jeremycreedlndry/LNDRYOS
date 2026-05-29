@@ -1,11 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, X, ChevronLeft, ChevronRight, MapPin, Phone, Clock, Calendar, Truck, Check, RotateCcw, ArrowUpCircle, ArrowDownCircle, Smartphone, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, X, ChevronLeft, ChevronRight, MapPin, Phone, Clock, Calendar, Truck, Check, RotateCcw, ArrowUpCircle, ArrowDownCircle, Smartphone, CheckCircle, XCircle, Pencil } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { ScheduleModal } from '@/components/pickups/ScheduleModal'
+import { CustomerModal } from '@/components/customers/CustomerModal'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -151,13 +152,20 @@ type CustomerStub = { id: string; first_name: string; last_name: string } | null
 
 export default function PickupsPage() {
   const utils = trpc.useUtils()
+
+  // ── All state first so mutations/queries can reference setters freely ─────
   const [selectedDate, setSelectedDate] = useState(isoDate(new Date()))
   const [showModal, setShowModal] = useState(false)
-  const [activeTab, setActiveTab] = useState<'stops' | 'schedules'>('stops')
+  const [activeTab, setActiveTab] = useState<'stops' | 'requests' | 'schedules'>('stops')
   const [selectedZone, setSelectedZone] = useState<string | undefined>()
-
-  // Drop-off prompt state
   const [dropOffCustomer, setDropOffCustomer] = useState<CustomerStub>(null)
+  const [customerModalId, setCustomerModalId] = useState<string | null>(null)
+  const [declineId, setDeclineId] = useState<string | null>(null)
+  const [declineReason, setDeclineReason] = useState('')
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editFields, setEditFields] = useState({ scheduled_date: '', time_start: '', time_end: '', notes: '' })
+  const [skippedOpen, setSkippedOpen] = useState(false)
+  const [typeFilter, setTypeFilter] = useState<'all' | 'pickup' | 'delivery'>('all')
 
   const { data: zones = [] } = trpc.deliveryZones.list.useQuery()
   const { data: stops = [], isLoading: stopsLoading } = trpc.pickupStops.listByDate.useQuery(
@@ -192,7 +200,7 @@ export default function PickupsPage() {
     onError: (e) => toast.error(e.message),
   })
   const patchStop = trpc.pickupStops.patchStop.useMutation({
-    onSuccess: () => { utils.pickupStops.listByDate.invalidate(); toast.success('Stop updated'); setEditId(null) },
+    onSuccess: () => { utils.pickupStops.listByDate.invalidate(); utils.pickupStops.listPendingRequests.invalidate(); toast.success('Stop updated'); setEditId(null) },
     onError: (e) => toast.error(e.message),
   })
 
@@ -234,12 +242,10 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
     updateStatus.mutate({ id, status: validStatus })
   }
 
-  const [declineId, setDeclineId] = useState<string | null>(null)
-  const [declineReason, setDeclineReason] = useState('')
-  const [editId, setEditId] = useState<string | null>(null)
-  const [editFields, setEditFields] = useState({ scheduled_date: '', time_start: '', time_end: '', notes: '' })
-  const [skippedOpen, setSkippedOpen] = useState(false)
-  const [typeFilter, setTypeFilter] = useState<'all' | 'pickup' | 'delivery'>('all')
+  const { data: customerForModal } = trpc.customers.getById.useQuery(
+    { id: customerModalId! },
+    { enabled: !!customerModalId }
+  )
   // Customer-app requests: source=customer_app AND not yet approved
   const requests   = (stops as (typeof stops[0] & { source?: string; approved_at?: string | null })[])
     .filter((s) => s.source === 'customer_app' && !s.approved_at && s.status !== 'skipped')
@@ -265,11 +271,20 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200 bg-white px-6 shrink-0">
-        {(['stops', 'schedules'] as const).map((t) => (
-          <button key={t} onClick={() => setActiveTab(t)}
-            className={cn('px-4 py-2.5 text-sm font-medium border-b-2 transition-colors',
-              activeTab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700')}>
-            {t === 'stops' ? "Today's Stops" : 'Recurring Schedules'}
+        {([
+          { key: 'stops',     label: "Today's Stops" },
+          { key: 'requests',  label: 'Requests' },
+          { key: 'schedules', label: 'Recurring Schedules' },
+        ] as { key: 'stops' | 'requests' | 'schedules'; label: string }[]).map(({ key, label }) => (
+          <button key={key} onClick={() => setActiveTab(key)}
+            className={cn('relative px-4 py-2.5 text-sm font-medium border-b-2 transition-colors',
+              activeTab === key ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700')}>
+            {label}
+            {key === 'requests' && pendingRequests.length > 0 && (
+              <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                {pendingRequests.length}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -358,162 +373,6 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
               </div>
             )}
 
-            {/* ── App Requests inbox (all unapproved customer-app requests, any date) ── */}
-            {pendingRequests.length > 0 && (
-              <div>
-                <div className="flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 mb-3">
-                  <Smartphone className="h-5 w-5 text-amber-600 shrink-0" />
-                  <div>
-                    <p className="text-sm font-bold text-amber-700">Booking Requests · {pendingRequests.length}</p>
-                    <p className="text-xs text-amber-500">Customers requested these pickups — approve or decline</p>
-                  </div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {pendingRequests.map((s) => {
-                    const c = s.customer
-                    const name = c ? `${c.first_name} ${c.last_name}` : 'Unknown'
-                    const address = [c?.address_street, c?.address_city].filter(Boolean).join(', ')
-                    return (
-                      <div key={s.id} className="rounded-xl border border-amber-200 bg-white p-3.5 space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
-                              <Smartphone className="inline h-3 w-3 mr-0.5" />App Request
-                            </span>
-                          </div>
-                          <span className="text-xs font-semibold text-amber-600 shrink-0">
-                            <Calendar className="inline h-3 w-3 mr-0.5" />
-                            {fmtDate(s.scheduled_date)}
-                            {s.time_start ? ` · ${fmtTime(s.time_start)}${s.time_end ? `–${fmtTime(s.time_end)}` : ''}` : ''}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900">{name}</p>
-                          {address && <p className="text-xs text-gray-500"><MapPin className="inline h-3 w-3 mr-0.5" />{address}</p>}
-                          {c?.phone && <p className="text-xs text-gray-500"><Phone className="inline h-3 w-3 mr-0.5" />{c.phone}</p>}
-                          {/* Show order notes (tier + preferences) */}
-                          {s.order?.notes && <p className="text-xs text-gray-500 mt-1">{s.order.notes}</p>}
-                          {s.notes && <p className="text-xs text-gray-400 mt-0.5 italic">"{s.notes}"</p>}
-                        </div>
-                        {editId === s.id ? (
-                          <div className="space-y-2 pt-1">
-                            <div className="grid grid-cols-2 gap-1.5">
-                              <div className="col-span-2">
-                                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Date</label>
-                                <input
-                                  type="date"
-                                  value={editFields.scheduled_date}
-                                  onChange={(e) => setEditFields((f) => ({ ...f, scheduled_date: e.target.value }))}
-                                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">From</label>
-                                <input
-                                  type="time"
-                                  value={editFields.time_start}
-                                  onChange={(e) => setEditFields((f) => ({ ...f, time_start: e.target.value }))}
-                                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">To</label>
-                                <input
-                                  type="time"
-                                  value={editFields.time_end}
-                                  onChange={(e) => setEditFields((f) => ({ ...f, time_end: e.target.value }))}
-                                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
-                                />
-                              </div>
-                              <div className="col-span-2">
-                                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Notes</label>
-                                <textarea
-                                  value={editFields.notes}
-                                  onChange={(e) => setEditFields((f) => ({ ...f, notes: e.target.value }))}
-                                  rows={2}
-                                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300 resize-none"
-                                />
-                              </div>
-                            </div>
-                            <div className="flex gap-1.5">
-                              <button
-                                onClick={() => setEditId(null)}
-                                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                onClick={() => patchStop.mutate({
-                                  id: s.id,
-                                  scheduled_date: editFields.scheduled_date || undefined,
-                                  time_start: editFields.time_start || null,
-                                  time_end: editFields.time_end || null,
-                                  notes: editFields.notes || null,
-                                })}
-                                disabled={patchStop.isPending}
-                                className="flex-1 rounded-lg border border-brand-200 bg-brand-50 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50"
-                              >
-                                Save Changes
-                              </button>
-                            </div>
-                          </div>
-                        ) : declineId === s.id ? (
-                          <div className="space-y-2 pt-1">
-                            <textarea
-                              value={declineReason}
-                              onChange={(e) => setDeclineReason(e.target.value)}
-                              placeholder="Reason for declining (required)…"
-                              rows={2}
-                              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-red-300 resize-none"
-                            />
-                            <div className="flex gap-1.5">
-                              <button
-                                onClick={() => { setDeclineId(null); setDeclineReason('') }}
-                                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                onClick={() => declineStop.mutate({ id: s.id, reason: declineReason })}
-                                disabled={!declineReason.trim() || declineStop.isPending}
-                                className="flex-1 rounded-lg border border-red-200 bg-red-50 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50"
-                              >
-                                <XCircle className="inline h-3 w-3 mr-1" />Send Decline
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex gap-1.5 pt-1">
-                            <button
-                              onClick={() => approveStop.mutate({ id: s.id })}
-                              disabled={approveStop.isPending}
-                              className="flex-1 rounded-lg border border-green-200 bg-green-50 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50"
-                            >
-                              <CheckCircle className="inline h-3 w-3 mr-1" />Approve
-                            </button>
-                            <button
-                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                              onClick={() => { setEditId(s.id); setEditFields({ scheduled_date: (s as any).scheduled_date ?? selectedDate, time_start: (s as any).time_start ?? '', time_end: (s as any).time_end ?? '', notes: (s as any).notes ?? '' }) }}
-                              className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => { setDeclineId(s.id); setDeclineReason('') }}
-                              disabled={declineStop.isPending}
-                              className="flex-1 rounded-lg border border-red-200 bg-red-50 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50"
-                            >
-                              <XCircle className="inline h-3 w-3 mr-1" />Decline
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
             {showPickups && pickups.length > 0 && (
               <div>
                 <div className="flex items-center gap-2 rounded-xl bg-blue-50 border border-blue-200 px-4 py-2.5 mb-3">
@@ -569,6 +428,169 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
           </div>
         )}
 
+        {activeTab === 'requests' && (
+          <div className="space-y-4 max-w-4xl">
+            {pendingRequests.length === 0 && (
+              <div className="rounded-xl border border-dashed border-gray-300 p-12 text-center">
+                <Smartphone className="h-8 w-8 text-gray-300 mx-auto mb-3" />
+                <p className="text-sm font-medium text-gray-400">No pending requests</p>
+                <p className="text-xs text-gray-400 mt-1">New customer app bookings will appear here for review</p>
+              </div>
+            )}
+            <div className="grid gap-2 sm:grid-cols-2">
+              {pendingRequests.map((s) => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const c = s.customer as any
+                const name = c
+                  ? [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || 'Unknown'
+                  : 'Unknown'
+                const address = [c?.address_street, c?.address_city].filter(Boolean).join(', ')
+                return (
+                  <div key={s.id} className="rounded-xl border border-amber-200 bg-white p-3.5 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-sm font-semibold text-gray-900">{name}</p>
+                          {c?.id && (
+                            <button
+                              onClick={() => setCustomerModalId(c.id)}
+                              className="text-gray-400 hover:text-brand-600 transition-colors"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                        <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-amber-100 text-amber-700 mt-1 inline-block">
+                          <Smartphone className="inline h-3 w-3 mr-0.5" />App Request
+                        </span>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs font-semibold text-amber-600">
+                          ↑ {fmtDate(s.scheduled_date)}
+                          {s.time_start ? ` · ${fmtTime(s.time_start)}${s.time_end ? `–${fmtTime(s.time_end)}` : ''}` : ''}
+                        </p>
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        {(s as any).delivery && (
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                            ↓ {fmtDate((s as any).delivery.scheduled_date)}
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                            {(s as any).delivery.time_start ? ` · ${fmtTime((s as any).delivery.time_start)}${(s as any).delivery.time_end ? `–${fmtTime((s as any).delivery.time_end)}` : ''}` : ''}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      {address && <p className="text-xs text-gray-500"><MapPin className="inline h-3 w-3 mr-0.5" />{address}</p>}
+                      {c?.phone && <p className="text-xs text-gray-500"><Phone className="inline h-3 w-3 mr-0.5" />{c.phone}</p>}
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                      {(s as any).order?.notes && <p className="text-xs text-gray-500 mt-1">{(s as any).order.notes}</p>}
+                      {s.notes && <p className="text-xs text-gray-400 mt-0.5 italic">"{s.notes}"</p>}
+                    </div>
+                    {editId === s.id ? (
+                      <div className="space-y-2 pt-1">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div className="col-span-2">
+                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Date</label>
+                            <input
+                              type="date"
+                              value={editFields.scheduled_date}
+                              onChange={(e) => setEditFields((f) => ({ ...f, scheduled_date: e.target.value }))}
+                              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">From</label>
+                            <input
+                              type="time"
+                              value={editFields.time_start}
+                              onChange={(e) => setEditFields((f) => ({ ...f, time_start: e.target.value }))}
+                              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">To</label>
+                            <input
+                              type="time"
+                              value={editFields.time_end}
+                              onChange={(e) => setEditFields((f) => ({ ...f, time_end: e.target.value }))}
+                              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Notes</label>
+                            <textarea
+                              value={editFields.notes}
+                              onChange={(e) => setEditFields((f) => ({ ...f, notes: e.target.value }))}
+                              rows={2}
+                              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300 resize-none"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex gap-1.5">
+                          <button onClick={() => setEditId(null)}
+                            className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-50">
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => patchStop.mutate({ id: s.id, scheduled_date: editFields.scheduled_date || undefined, time_start: editFields.time_start || null, time_end: editFields.time_end || null, notes: editFields.notes || null })}
+                            disabled={patchStop.isPending}
+                            className="flex-1 rounded-lg border border-brand-200 bg-brand-50 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50">
+                            Save Changes
+                          </button>
+                        </div>
+                      </div>
+                    ) : declineId === s.id ? (
+                      <div className="space-y-2 pt-1">
+                        <textarea
+                          value={declineReason}
+                          onChange={(e) => setDeclineReason(e.target.value)}
+                          placeholder="Reason for declining (required)…"
+                          rows={2}
+                          className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-red-300 resize-none"
+                        />
+                        <div className="flex gap-1.5">
+                          <button onClick={() => { setDeclineId(null); setDeclineReason('') }}
+                            className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-50">
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => declineStop.mutate({ id: s.id, reason: declineReason })}
+                            disabled={!declineReason.trim() || declineStop.isPending}
+                            className="flex-1 rounded-lg border border-red-200 bg-red-50 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50">
+                            <XCircle className="inline h-3 w-3 mr-1" />Send Decline
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-1.5 pt-1">
+                        <button
+                          onClick={() => approveStop.mutate({ id: s.id })}
+                          disabled={approveStop.isPending}
+                          className="flex-1 rounded-lg border border-green-200 bg-green-50 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50">
+                          <CheckCircle className="inline h-3 w-3 mr-1" />Approve
+                        </button>
+                        <button
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          onClick={() => { setEditId(s.id); setEditFields({ scheduled_date: (s as any).scheduled_date ?? '', time_start: s.time_start ?? '', time_end: s.time_end ?? '', notes: s.notes ?? '' }) }}
+                          className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => { setDeclineId(s.id); setDeclineReason('') }}
+                          disabled={declineStop.isPending}
+                          className="flex-1 rounded-lg border border-red-200 bg-red-50 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50">
+                          <XCircle className="inline h-3 w-3 mr-1" />Decline
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {activeTab === 'schedules' && (
           <div className="max-w-2xl space-y-2">
             {schedulesLoading && <p className="text-center text-sm text-gray-400 py-8">Loading…</p>}
@@ -616,6 +638,15 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
 
       {showModal && (
         <ScheduleModal onClose={() => setShowModal(false)} onSaved={() => setShowModal(false)} />
+      )}
+
+      {customerModalId && customerForModal && (
+        <CustomerModal
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          customer={customerForModal as any}
+          onClose={() => setCustomerModalId(null)}
+          onSaved={() => { setCustomerModalId(null); utils.pickupStops.listPendingRequests.invalidate() }}
+        />
       )}
 
       {dropOffCustomer && (

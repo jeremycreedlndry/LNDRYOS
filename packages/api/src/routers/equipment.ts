@@ -128,7 +128,7 @@ export const equipmentRouter = router({
       if (!res.ok) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Nayax API error: ${res.status}` })
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const machines: any[] = await res.json()
+      const machines = (await res.json()) as any[]
 
       const typeMap = (name: string): 'washer' | 'dryer' | null => {
         const n = name.toUpperCase()
@@ -183,10 +183,16 @@ export const equipmentRouter = router({
         .eq('tenant_id', ctx.tenantId)
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
-      return (data ?? []).map((row) => ({
-        ...(row.equipment as { id: string; name: string; type: string }),
-        duration_minutes: row.duration_minutes as number | null,
-        temperature: row.temperature as string | null,
-      }))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (data ?? []).map((row) => {
+        const eq = row.equipment as any
+        return {
+          id: eq?.id as string,
+          name: eq?.name as string,
+          type: eq?.type as string,
+          duration_minutes: row.duration_minutes as number | null,
+          temperature: row.temperature as string | null,
+        }
+      })
     }),
 })

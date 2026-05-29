@@ -471,6 +471,12 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
                       ))}
                     </tbody>
                     <tfoot className="border-t border-gray-200 bg-gray-50">
+                      {(order as { delivery_fee_cents?: number }).delivery_fee_cents ? (
+                        <tr>
+                          <td colSpan={3} className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">🚐 Delivery fee</td>
+                          <td className="px-3 py-2 text-right text-gray-700">{formatCurrency((order as { delivery_fee_cents?: number }).delivery_fee_cents!)}</td>
+                        </tr>
+                      ) : null}
                       <tr>
                         <td colSpan={3} className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</td>
                         <td className="px-3 py-2 text-right font-bold text-gray-900">{formatCurrency(order.total_amount)}</td>

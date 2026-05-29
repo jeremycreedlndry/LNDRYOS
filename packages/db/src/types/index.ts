@@ -77,6 +77,7 @@ export interface OrderPreferenceOptions {
   detergent_type?: string[]
   fabric_softener?: string[]
   wash_temperature?: string[]
+  dryer?: string[]
 }
 
 export type DefaultPaymentType =
@@ -104,6 +105,7 @@ export interface TenantSettings {
   auto_email_ready?: boolean
   default_due_days?: number
   order_preference_options?: OrderPreferenceOptions
+  time_slots?: string[]
   /** Default payment method pre-selected at checkout. Falls back to saved_card. */
   default_payment_type?: DefaultPaymentType
 }

@@ -400,6 +400,33 @@ export function invoiceEmail(d: InvoiceEmailData): { subject: string; html: stri
   }
 }
 
+// ─── Booking Declined ─────────────────────────────────────────────────────────
+
+export interface BookingDeclinedData {
+  storeName: string
+  storePhone?: string | null
+  customerName: string
+  scheduledDate: string      // e.g. "Thursday, May 29"
+  timeWindow?: string | null // e.g. "10:00am–12:00pm"
+  reason: string
+}
+
+export function bookingDeclinedEmail(d: BookingDeclinedData): { subject: string; html: string } {
+  const body = `
+    <p>Hi ${d.customerName},</p>
+    <p>Unfortunately, we're unable to accommodate your pickup request${d.scheduledDate ? ` for <strong>${d.scheduledDate}</strong>` : ''}${d.timeWindow ? ` (${d.timeWindow})` : ''}.</p>
+    <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px;margin:16px 0;">
+      <p style="margin:0;font-size:14px;color:#991b1b;"><strong>Reason:</strong> ${d.reason}</p>
+    </div>
+    <p>Please contact us to arrange an alternative time.</p>
+    ${d.storePhone ? `<div class="divider"></div><p style="font-size:13px;color:#6b7280">Call us at ${d.storePhone}</p>` : ''}
+  `
+  return {
+    subject: `Pickup request declined — ${d.scheduledDate}`,
+    html: emailLayout(d.storeName, body),
+  }
+}
+
 // ─── Pickup reminder ──────────────────────────────────────────────────────────
 
 export interface PickupReminderData {

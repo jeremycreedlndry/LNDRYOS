@@ -130,7 +130,7 @@ export const tenantsRouter = router({
       cancel_url: z.string().url(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-01-27.acacia' })
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-02-24.acacia' })
 
       const { data: tenant } = await ctx.supabase
         .from('tenants')
@@ -165,7 +165,7 @@ export const tenantsRouter = router({
 
     if (!tenant?.stripe_subscription_id) return null
 
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-01-27.acacia' })
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-02-24.acacia' })
     const sub = await stripe.subscriptions.retrieve(tenant.stripe_subscription_id)
 
     return {

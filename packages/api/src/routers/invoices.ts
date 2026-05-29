@@ -387,9 +387,10 @@ export const invoicesRouter = router({
             paidAmount:  o.paid_amount,
             lines:       (o.lines ?? []).map((l) => ({ name: l.name, quantity: l.quantity, lineTotal: l.line_total })),
           })),
-          subtotalCents: inv.subtotal_cents,
-          taxCents:      inv.tax_cents,
-          totalCents:    inv.total_cents,
+          subtotalCents:     inv.subtotal_cents,
+          deliveryFeeCents:  fullOrders.reduce((s, o) => s + ((o as { delivery_fee_cents?: number }).delivery_fee_cents ?? 0), 0) || undefined,
+          taxCents:          inv.tax_cents,
+          totalCents:        inv.total_cents,
           reference,
         })
       } catch (pdfErr) {

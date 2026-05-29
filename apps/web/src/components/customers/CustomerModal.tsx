@@ -38,6 +38,12 @@ interface CustomerFormData {
   pref_fabric_softener: string; pref_wash_temperature: string
 }
 
+// Normalize preference values to lowercase_underscore so they match what the customer app stores
+// and what PrefSelect option values produce.
+function normalizeOptionValue(s: string) {
+  return s.toLowerCase().replace(/\s+/g, '_').replace(/&/g, 'and')
+}
+
 function initForm(customer?: Customer | null): CustomerFormData {
   return {
     first_name:           customer?.first_name ?? '',
@@ -59,13 +65,14 @@ function initForm(customer?: Customer | null): CustomerFormData {
     discount_percent:     String(customer?.discount_percent ?? 0),
     account_balance:      String((customer?.account_balance ?? 0) / 100),
     tax_exempt:           customer?.tax_exempt ?? false,
-    delivery_fee:         String((customer?.delivery_fee_cents ?? 0) / 100),
+    delivery_fee:         customer?.delivery_fee_cents != null ? String(customer.delivery_fee_cents / 100) : '',
     notification_preference: customer?.notification_preference ?? 'sms_email',
-    pref_bleach:          customer?.order_preferences?.bleach ?? '',
-    pref_dryer_sheets:    customer?.order_preferences?.dryer_sheets ?? '',
-    pref_detergent_type:  customer?.order_preferences?.detergent_type ?? '',
-    pref_fabric_softener: customer?.order_preferences?.fabric_softener ?? '',
-    pref_wash_temperature:customer?.order_preferences?.wash_temperature ?? '',
+    // Normalize to lowercase_underscore — customer app and older staff entries may differ in case
+    pref_bleach:          normalizeOptionValue(customer?.order_preferences?.bleach ?? ''),
+    pref_dryer_sheets:    normalizeOptionValue(customer?.order_preferences?.dryer_sheets ?? ''),
+    pref_detergent_type:  normalizeOptionValue(customer?.order_preferences?.detergent_type ?? ''),
+    pref_fabric_softener: normalizeOptionValue(customer?.order_preferences?.fabric_softener ?? ''),
+    pref_wash_temperature:normalizeOptionValue(customer?.order_preferences?.wash_temperature ?? ''),
   }
 }
 
@@ -88,13 +95,18 @@ function Select({ value, onChange, options, placeholder }: {
 function PrefSelect({ label, value, onChange, options }: {
   label: string; value: string; onChange: (v: string) => void; options: string[]
 }) {
+  // Normalize option values to lowercase_underscore so they match what the customer app stores
+  const normalized = options.map((o) => ({ value: normalizeOptionValue(o), label: o }))
+  const hasMatch = normalized.some((o) => o.value === value)
   return (
     <div>
       <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
       <select value={value} onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500">
         <option value="">No Preference</option>
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+        {normalized.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {/* If the stored value doesn't match any option (e.g. from a different option set), show it */}
+        {!hasMatch && value && <option value={value}>{value}</option>}
       </select>
     </div>
   )
@@ -330,7 +342,8 @@ export function CustomerModal({ customer, onClose, onSaved }: Props) {
       invoice_style:       form.invoice_style,
       discount_percent:    parseInt(form.discount_percent) || 0,
       account_balance:     Math.round((parseFloat(form.account_balance) || 0) * 100),
-      delivery_fee_cents:        Math.round((parseFloat(form.delivery_fee) || 0) * 100),
+      // null = use tenant default; 0 = explicitly waived; >0 = custom amount
+      delivery_fee_cents:        form.delivery_fee.trim() === '' ? null : Math.round((parseFloat(form.delivery_fee) || 0) * 100),
       notification_preference:   form.notification_preference,
       tax_exempt:                form.tax_exempt,
       order_preferences: {
@@ -457,7 +470,26 @@ export function CustomerModal({ customer, onClose, onSaved }: Props) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Delivery Fee ($)</label>
-                <Input type="number" min="0" step="0.01" value={form.delivery_fee} onChange={(e) => set('delivery_fee', e.target.value)} placeholder="0.00" />
+                {(() => {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const tenantDefault = (tenant?.settings as any)?.delivery_fee_cents as number | undefined
+                  const defaultLabel = tenantDefault != null
+                    ? `Store default ($${(tenantDefault / 100).toFixed(2)})`
+                    : 'Store default ($0.00)'
+                  return (
+                    <>
+                      <Input
+                        type="number" min="0" step="0.01"
+                        value={form.delivery_fee}
+                        onChange={(e) => set('delivery_fee', e.target.value)}
+                        placeholder={defaultLabel}
+                      />
+                      {form.delivery_fee.trim() === '' && (
+                        <p className="text-xs text-gray-400 mt-0.5">Leave blank to use {defaultLabel.toLowerCase()}</p>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Marketing</label>

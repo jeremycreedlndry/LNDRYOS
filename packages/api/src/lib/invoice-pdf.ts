@@ -85,10 +85,11 @@ export interface InvoicePdfData {
     paidAmount:   number
     lines:        { name: string; quantity: number; lineTotal: number }[]
   }[]
-  subtotalCents: number
-  taxCents:      number
-  totalCents:    number
-  reference:     string
+  subtotalCents:      number
+  deliveryFeeCents?:  number
+  taxCents:           number
+  totalCents:         number
+  reference:          string
 }
 
 // ─── Component (no JSX — uses React.createElement to avoid jsx-dev-runtime) ───
@@ -166,15 +167,23 @@ function InvoiceDocument(d: InvoicePdfData) {
         // Totals
         el(View, { style: s.totalsWrap },
           el(View, { style: s.totalsInner },
-            ...(d.taxCents > 0 ? [
+            ...((d.taxCents > 0 || (d.deliveryFeeCents ?? 0) > 0) ? [
               el(View, { style: s.totRow },
                 el(Text, { style: s.totKey }, 'Subtotal'),
                 el(Text, { style: s.totVal }, fmt(d.subtotalCents)),
               ),
-              el(View, { style: s.totRow },
-                el(Text, { style: s.totKey }, d.taxName),
-                el(Text, { style: s.totVal }, fmt(d.taxCents)),
-              ),
+              ...((d.deliveryFeeCents ?? 0) > 0 ? [
+                el(View, { style: s.totRow },
+                  el(Text, { style: s.totKey }, 'Delivery fee'),
+                  el(Text, { style: s.totVal }, fmt(d.deliveryFeeCents!)),
+                ),
+              ] : []),
+              ...(d.taxCents > 0 ? [
+                el(View, { style: s.totRow },
+                  el(Text, { style: s.totKey }, d.taxName),
+                  el(Text, { style: s.totVal }, fmt(d.taxCents)),
+                ),
+              ] : []),
             ] : []),
             el(View, { style: [s.totRow, s.totalDivider] },
               el(Text, { style: s.grandKey }, 'Total'),

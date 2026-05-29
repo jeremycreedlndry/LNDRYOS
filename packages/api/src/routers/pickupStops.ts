@@ -63,42 +63,95 @@ export const pickupStopsRouter = router({
     }),
 
   // ── All pending customer-app requests (any date, not yet approved/skipped) ───
-  // Used to surface new bookings in the LNDRYOS Pickups page regardless of which
-  // date the staff member is currently viewing.
+  // Returns one row per BOOKING (pickup stop only). Delivery info is merged in.
   listPendingRequests: tenantProcedure
     .query(async ({ ctx }) => {
+      // Only pickup stops — one per booking
       const { data, error } = await ctx.supabase
         .from('pickup_stops')
         .select(`
           *,
-          customer:customers(id, first_name, last_name, phone, address_street, address_city, address_postal_code, driver_instructions),
+          customer:customers(id, first_name, last_name, email, phone, address_street, address_city, address_postal_code, driver_instructions),
           order:orders(id, order_number, status, notes)
         `)
         .eq('tenant_id', ctx.tenantId)
         .eq('source', 'customer_app')
+        .eq('type', 'pickup')
         .is('approved_at', null)
         .neq('status', 'skipped')
         .order('scheduled_date')
         .order('time_start')
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
-      return data ?? []
+      const pickups = data ?? []
+
+      // Fetch linked delivery stops so the card can show the full booking
+      const orderIds = pickups.map((s) => s.order_id).filter(Boolean) as string[]
+      const deliveryMap: Record<string, { scheduled_date: string; time_start: string | null; time_end: string | null }> = {}
+      if (orderIds.length > 0) {
+        const { data: deliveries } = await ctx.supabase
+          .from('pickup_stops')
+          .select('order_id, scheduled_date, time_start, time_end')
+          .in('order_id', orderIds)
+          .eq('type', 'delivery')
+          .eq('tenant_id', ctx.tenantId)
+        for (const d of deliveries ?? []) {
+          if (d.order_id) deliveryMap[d.order_id] = d
+        }
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return pickups.map((s: any) => ({
+        ...s,
+        delivery: s.order_id ? (deliveryMap[s.order_id] ?? null) : null,
+      }))
     }),
 
-  // ── Approve a customer-app stop request ──────────────────────────────────────
+  // ── Count pending customer-app requests (used by nav badge) ─────────────────
+  countPendingRequests: tenantProcedure
+    .query(async ({ ctx }) => {
+      const { count, error } = await ctx.supabase
+        .from('pickup_stops')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenant_id', ctx.tenantId)
+        .eq('source', 'customer_app')
+        .eq('type', 'pickup')
+        .is('approved_at', null)
+        .neq('status', 'skipped')
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return { count: count ?? 0 }
+    }),
+
+  // ── Approve a customer-app booking (pickup + linked delivery) ────────────────
   approveStop: tenantProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const { error } = await ctx.supabase
+      // Get the stop's order_id so we can approve all stops in the booking
+      const { data: stop } = await ctx.supabase
         .from('pickup_stops')
-        .update({
-          approved_at: new Date().toISOString(),
-          approved_by: ctx.userId,
-        })
+        .select('order_id')
         .eq('id', input.id)
         .eq('tenant_id', ctx.tenantId)
-        .eq('source', 'customer_app')
-      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+        .maybeSingle()
+
+      const now = new Date().toISOString()
+      if (stop?.order_id) {
+        // Approve every stop in this booking (pickup + delivery)
+        const { error } = await ctx.supabase
+          .from('pickup_stops')
+          .update({ approved_at: now, approved_by: ctx.userId })
+          .eq('order_id', stop.order_id)
+          .eq('tenant_id', ctx.tenantId)
+          .eq('source', 'customer_app')
+        if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      } else {
+        const { error } = await ctx.supabase
+          .from('pickup_stops')
+          .update({ approved_at: now, approved_by: ctx.userId })
+          .eq('id', input.id)
+          .eq('tenant_id', ctx.tenantId)
+        if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      }
       return { success: true }
     }),
 

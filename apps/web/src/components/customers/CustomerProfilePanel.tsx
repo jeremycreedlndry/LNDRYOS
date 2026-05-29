@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { X, CreditCard, DollarSign, Banknote, FileText, ChevronRight, Send, Plus, MessageSquare, Truck, Trash2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { X, CreditCard, DollarSign, Banknote, FileText, ChevronRight, Send, Plus, MessageSquare, Truck, Trash2, ShoppingCart } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AddressAutocomplete } from '@/components/ui/AddressAutocomplete'
@@ -1086,6 +1087,7 @@ export function CustomerProfilePanel({ customerId, onClose, initialTab }: {
   onClose: () => void
   initialTab?: Tab
 }) {
+  const router = useRouter()
   const [tab,            setTab]            = useState<Tab>(initialTab ?? 'orders')
   const [showCollect,    setShowCollect]    = useState(false)
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null)
@@ -1138,6 +1140,13 @@ export function CustomerProfilePanel({ customerId, onClose, initialTab }: {
                   Collect {formatCurrency(totalOutstanding)}
                 </button>
               )}
+              <button
+                onClick={() => { onClose(); router.push(`/pos?customer=${customerId}`) }}
+                className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
+              >
+                <ShoppingCart className="h-3.5 w-3.5" />
+                New Order
+              </button>
               <button onClick={onClose} className="text-gray-400 hover:text-gray-600 ml-1">
                 <X className="h-5 w-5" />
               </button>

@@ -204,6 +204,7 @@ function POSInner() {
   const searchParams = useSearchParams()
   const editOrderId = searchParams.get('orderId')
   const isEditMode = !!editOrderId
+  const preselectedCustomerId = searchParams.get('customer')
 
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [activePriceListId, setActivePriceListId] = useState<string | null>(null)
@@ -255,6 +256,18 @@ function POSInner() {
     setInitialized(true)
   }, [editOrder, initialized])
 
+  // Pre-select customer when navigating from /customers?customer=<id>
+  const { data: preselectedCustomer } = trpc.customers.getById.useQuery(
+    { id: preselectedCustomerId! },
+    { enabled: !!preselectedCustomerId && !isEditMode }
+  )
+  useEffect(() => {
+    if (preselectedCustomer && !customer) {
+      setCustomer(preselectedCustomer as Customer)
+      setActivePriceListId(preselectedCustomer.price_list_id ?? null)
+    }
+  }, [preselectedCustomer]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSelectCustomer = (c: Customer | null) => {
     setCustomer(c)
     setActivePriceListId(c?.price_list_id ?? null)
@@ -270,6 +283,11 @@ function POSInner() {
   useEffect(() => { ensureGiftCards.mutate() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const taxRate = (tenantSettings?.settings as { tax_rate?: number })?.tax_rate ?? 0
+  const tenantDeliveryFee = (tenantSettings?.settings as { delivery_fee_cents?: number })?.delivery_fee_cents ?? 0
+  // Effective delivery fee: customer override > tenant default; null on customer = use tenant default
+  const customerDeliveryFee = customer
+    ? (customer.delivery_fee_cents != null ? customer.delivery_fee_cents : tenantDeliveryFee)
+    : 0
 
   const saveCustomerPrefs = trpc.customers.update.useMutation()
 
@@ -370,6 +388,7 @@ function POSInner() {
         customer_name: customer ? `${customer.first_name} ${customer.last_name}` : null,
         lines: buildLines(),
         tax_rate: taxRate,
+        delivery_fee_cents: customerDeliveryFee,
       })
     } else {
       const defaultDueDays = (tenantSettings?.settings as Record<string, unknown> | null)?.default_due_days as number | undefined ?? 2
@@ -381,6 +400,7 @@ function POSInner() {
         lines: buildLines(),
         tax_rate: taxRate,
         due_date: dueDate.toISOString().split('T')[0],
+        delivery_fee_cents: customerDeliveryFee,
       })
     }
   }, [customer, cartLines, taxRate, createOrder, updateOrder, isEditMode, editOrderId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -491,6 +511,7 @@ function POSInner() {
           </div>
           <OrderCart lines={cartLines} taxRate={taxRate}
             hasCustomer={!!customer} customerId={customer?.id ?? null}
+            deliveryFeeCents={customerDeliveryFee}
             onUpdateQuantity={handleUpdateQty}
             onRemoveLine={(key) => setCartLines((prev) => prev.filter((l) => l.key !== key))}
             onCheckout={handleCheckout} isSubmitting={isSubmitting}

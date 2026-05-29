@@ -26,6 +26,7 @@ interface Props {
   taxRate: number
   hasCustomer: boolean
   customerId?: string | null
+  deliveryFeeCents?: number
   onUpdateQuantity: (key: string, qty: number) => void
   onRemoveLine: (key: string) => void
   onCheckout: () => void
@@ -39,6 +40,7 @@ export function OrderCart({
   taxRate,
   hasCustomer,
   customerId,
+  deliveryFeeCents = 0,
   onUpdateQuantity,
   onRemoveLine,
   onCheckout,
@@ -51,6 +53,7 @@ export function OrderCart({
     .filter((l) => l.category !== 'gift_card')
     .reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
   const tax = Math.round(taxableSubtotal * taxRate)
+  const deliveryFee = deliveryFeeCents
 
   // ── Discount state ────────────────────────────────────────────────────────
   const [manualPct, setManualPct]   = useState('')
@@ -83,7 +86,7 @@ export function OrderCart({
     return 0
   })()
 
-  const total = Math.max(0, subtotal + tax - manualDiscountCents)
+  const total = Math.max(0, subtotal + tax + deliveryFee - manualDiscountCents)
 
   // Notify parent whenever discount changes
   useEffect(() => {
@@ -226,6 +229,17 @@ export function OrderCart({
           <span>Subtotal</span>
           <span>{formatCurrency(subtotal)}</span>
         </div>
+
+        {/* Delivery fee row */}
+        {deliveryFee > 0 && (
+          <div className="flex justify-between text-sm text-gray-600">
+            <span className="flex items-center gap-1.5">
+              <span>🚐</span>
+              <span>Delivery fee</span>
+            </span>
+            <span>{formatCurrency(deliveryFee)}</span>
+          </div>
+        )}
 
         {/* Discount row */}
         <div className="space-y-1.5">

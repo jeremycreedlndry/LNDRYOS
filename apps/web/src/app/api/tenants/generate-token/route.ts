@@ -2,11 +2,10 @@ import { NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase-server'
 import { createSupabaseServiceClient } from '@laundry/db'
 
-export async function GET() {
+export async function POST() {
   const supabase = await createServerClient()
   const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) return NextResponse.json({ tenant: null })
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const service = createSupabaseServiceClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,15 +20,19 @@ export async function GET() {
     .limit(1)
     .maybeSingle()
 
-  if (!member?.tenant_id) return NextResponse.json({ tenant: null, customer_api_token: null })
+  if (!member?.tenant_id) return NextResponse.json({ error: 'Not a tenant member' }, { status: 403 })
+
+  const bytes = new Uint8Array(30)
+  crypto.getRandomValues(bytes)
+  const token = 'lndry_' + Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: tenantRow } = await (service as any)
+  const { error } = await (service as any)
     .from('tenants')
-    .select('customer_api_token')
+    .update({ customer_api_token: token })
     .eq('id', member.tenant_id)
-    .single()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return NextResponse.json({ tenant: member, customer_api_token: (tenantRow as any)?.customer_api_token ?? null })
+  if (error) return NextResponse.json({ error: (error as { message: string }).message }, { status: 500 })
+
+  return NextResponse.json({ token })
 }

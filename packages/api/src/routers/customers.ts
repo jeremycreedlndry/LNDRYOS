@@ -50,7 +50,7 @@ const customerSchema = z.object({
   order_preferences: orderPreferencesSchema.default({}),
   saved_card_last4:   z.string().nullable().optional(),
   saved_card_brand:   z.string().nullable().optional(),
-  delivery_fee_cents: z.number().int().nonnegative().default(0),
+  delivery_fee_cents: z.number().int().nonnegative().nullable().optional(),
   notification_preference: z.enum(['sms', 'email', 'sms_email', 'none']).default('sms_email'),
   notification_topics: notificationTopicsSchema.default(DEFAULT_NOTIFICATION_TOPICS),
 })
@@ -59,7 +59,8 @@ export const customersRouter = router({
   list: tenantProcedure
     .input(z.object({ query: z.string().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      let q = ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let q: any = ctx.supabase
         .from('customers')
         .select('*')
         .eq('tenant_id', ctx.tenantId)
@@ -68,9 +69,13 @@ export const customersRouter = router({
         .limit(200)
 
       if (input?.query && input.query.length >= 1) {
-        q = q.or(
-          `first_name.ilike.%${input.query}%,last_name.ilike.%${input.query}%,phone.ilike.%${input.query}%,email.ilike.%${input.query}%`
-        )
+        // Split into tokens so "David B" matches first_name=David AND last_name starts with B
+        const tokens = input.query.trim().split(/\s+/).filter(Boolean)
+        for (const token of tokens) {
+          q = q.or(
+            `first_name.ilike.%${token}%,last_name.ilike.%${token}%,phone.ilike.%${token}%,email.ilike.%${token}%`
+          )
+        }
       }
 
       const { data, error } = await q
@@ -81,16 +86,20 @@ export const customersRouter = router({
   search: tenantProcedure
     .input(z.object({ query: z.string().min(1), limit: z.number().default(10) }))
     .query(async ({ ctx, input }) => {
-      const { data, error } = await ctx.supabase
+      const tokens = input.query.trim().split(/\s+/).filter(Boolean)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let q: any = ctx.supabase
         .from('customers')
         .select('*')
         .eq('tenant_id', ctx.tenantId)
-        .or(
-          `first_name.ilike.%${input.query}%,last_name.ilike.%${input.query}%,phone.ilike.%${input.query}%,email.ilike.%${input.query}%`
-        )
         .order('last_name')
         .limit(input.limit)
-
+      for (const token of tokens) {
+        q = q.or(
+          `first_name.ilike.%${token}%,last_name.ilike.%${token}%,phone.ilike.%${token}%,email.ilike.%${token}%`
+        )
+      }
+      const { data, error } = await q
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
       return data
     }),

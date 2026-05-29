@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Check, X, WashingMachine, Wind, FoldVertical, Zap, FlaskConical,
   CreditCard, MessageSquare, ChevronDown, ChevronUp,
@@ -359,6 +359,54 @@ function QuoSection() {
   )
 }
 
+// ─── Customer App section ─────────────────────────────────────────────────────
+
+function CustomerAppSection() {
+  const [token, setToken] = useState<string | null>(null)
+  const [generating, setGenerating] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/tenants/me')
+      .then((r) => r.json())
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then((d: any) => setToken(d?.customer_api_token ?? null))
+      .catch(() => null)
+  }, [])
+
+  const generate = () => {
+    if (token && !confirm('Regenerate token? Connected apps will need updating.')) return
+    setGenerating(true)
+    fetch('/api/tenants/generate-token', { method: 'POST' })
+      .then((r) => r.json())
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then((d: any) => {
+        if (d?.token) { setToken(d.token); toast.success('Token generated') }
+        else toast.error('Failed')
+      })
+      .catch(() => toast.error('Failed'))
+      .finally(() => setGenerating(false))
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white px-5 py-4 space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-gray-900">Customer App</p>
+        <p className="text-xs text-gray-500 mt-0.5">API token for the LNDRYOS customer app</p>
+      </div>
+      {token && (
+        <p className="font-mono text-xs text-gray-700 break-all bg-gray-50 rounded-lg px-3 py-2 select-all">{token}</p>
+      )}
+      <button
+        onClick={generate}
+        disabled={generating}
+        className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+      >
+        {generating ? 'Generating…' : token ? 'Regenerate token' : 'Generate token'}
+      </button>
+    </div>
+  )
+}
+
 // ─── Main tab ─────────────────────────────────────────────────────────────────
 
 export function IntegrationsTab() {
@@ -371,6 +419,7 @@ export function IntegrationsTab() {
       <NayaxSection />
       <StripeSection />
       <QuoSection />
+      <CustomerAppSection />
     </div>
   )
 }

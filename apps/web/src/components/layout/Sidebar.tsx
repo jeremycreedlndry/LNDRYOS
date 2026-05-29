@@ -24,7 +24,7 @@ const NAV = [
   { href: '/pos',       label: 'POS',       icon: ShoppingCart },
   { href: '/orders',    label: 'Orders',    icon: ClipboardList },
   { href: '/workflow',  label: 'Workflow',  icon: Workflow },
-  { href: '/pickups',   label: 'Pickups',   icon: Truck },
+  { href: '/pickups',   label: 'Pickups',   icon: Truck, requestBadge: true },
   { href: '/customers', label: 'Customers', icon: Users },
   { href: '/invoices',    label: 'Invoices',    icon: FileText },
   { href: '/gift-cards', label: 'Gift Cards',  icon: Gift },
@@ -44,6 +44,10 @@ export function Sidebar({ tenantName }: Props) {
     refetchInterval: 30_000,
   })
   const unreadCount = unread?.count ?? 0
+  const { data: pendingReqs } = trpc.pickupStops.countPendingRequests.useQuery(undefined, {
+    refetchInterval: 30_000,
+  })
+  const pendingCount = pendingReqs?.count ?? 0
 
   return (
     <aside className="hidden lg:flex w-56 shrink-0 flex-col border-r border-gray-200 bg-white">
@@ -55,9 +59,10 @@ export function Sidebar({ tenantName }: Props) {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {NAV.map(({ href, label, icon: Icon, badge }) => {
+        {NAV.map(({ href, label, icon: Icon, badge, requestBadge }) => {
           const active = pathname.startsWith(href)
           const showBadge = badge && unreadCount > 0
+          const showRequestBadge = requestBadge && pendingCount > 0
           return (
             <Link
               key={href}
@@ -74,6 +79,11 @@ export function Sidebar({ tenantName }: Props) {
               {showBadge && (
                 <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-500 px-1 text-[10px] font-bold text-white">
                   {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+              {showRequestBadge && (
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                  {pendingCount > 99 ? '99+' : pendingCount}
                 </span>
               )}
             </Link>

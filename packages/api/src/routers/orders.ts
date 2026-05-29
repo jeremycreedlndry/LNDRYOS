@@ -34,7 +34,8 @@ export const ordersRouter = router({
           customer:customers(id, first_name, last_name, phone, order_preferences),
           lines:order_lines(id, name, category, quantity, unit_label, unit_price, notes),
           assignments:order_equipment_assignments(duration_minutes, temperature, assigned_at, equipment:equipment(id, name, type)),
-          issues:order_issues(id)
+          issues:order_issues(id),
+          pickup_stops(id, source, approved_at, type)
         `)
         .eq('tenant_id', ctx.tenantId)
         .order('created_at', { ascending: false })
@@ -77,6 +78,7 @@ export const ordersRouter = router({
       due_date: z.string().nullable().optional(),
       tax_rate: z.number().min(0).max(1).default(0),
       discount_amount: z.number().int().nonnegative().default(0),
+      delivery_fee_cents: z.number().int().nonnegative().default(0),
     }))
     .mutation(async ({ ctx, input }) => {
       const subtotal = input.lines.reduce((sum, l) => sum + Math.round(l.quantity * l.unit_price), 0)
@@ -84,7 +86,8 @@ export const ordersRouter = router({
         .filter((l) => l.category !== 'gift_card')
         .reduce((sum, l) => sum + Math.round(l.quantity * l.unit_price), 0)
       const taxAmount = Math.round(taxableSubtotal * input.tax_rate)
-      const total = subtotal + taxAmount - input.discount_amount
+      const deliveryFee = input.delivery_fee_cents
+      const total = subtotal + taxAmount + deliveryFee - input.discount_amount
 
       const { data: lastOrder } = await ctx.supabase
         .from('orders')
@@ -114,6 +117,7 @@ export const ordersRouter = router({
           subtotal,
           tax_amount: taxAmount,
           discount_amount: input.discount_amount,
+          delivery_fee_cents: deliveryFee,
           total_amount: total,
           created_by: ctx.userId,
         })
@@ -216,12 +220,13 @@ export const ordersRouter = router({
       lines: z.array(orderLineInputSchema).min(1),
       tax_rate: z.number().min(0).max(1).default(0),
       discount_amount: z.number().int().nonnegative().default(0),
+      delivery_fee_cents: z.number().int().nonnegative().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       // Verify the order belongs to this tenant and is still editable
       const { data: existing, error: fetchErr } = await ctx.supabase
         .from('orders')
-        .select('id, status, payment_status')
+        .select('id, status, payment_status, delivery_fee_cents')
         .eq('id', input.id)
         .eq('tenant_id', ctx.tenantId)
         .single()
@@ -236,7 +241,9 @@ export const ordersRouter = router({
         .filter((l) => l.category !== 'gift_card')
         .reduce((sum, l) => sum + Math.round(l.quantity * l.unit_price), 0)
       const taxAmount = Math.round(taxableSubtotal * input.tax_rate)
-      const total = subtotal + taxAmount - input.discount_amount
+      // Preserve existing delivery fee unless explicitly overridden
+      const deliveryFee = input.delivery_fee_cents ?? existing.delivery_fee_cents ?? 0
+      const total = subtotal + taxAmount + deliveryFee - input.discount_amount
 
       // Replace all lines
       await ctx.supabase.from('order_lines').delete().eq('order_id', input.id).eq('tenant_id', ctx.tenantId)
@@ -269,6 +276,7 @@ export const ordersRouter = router({
           subtotal,
           tax_amount: taxAmount,
           discount_amount: input.discount_amount,
+          delivery_fee_cents: deliveryFee,
           total_amount: total,
           status: newStatus,
           updated_at: new Date().toISOString(),

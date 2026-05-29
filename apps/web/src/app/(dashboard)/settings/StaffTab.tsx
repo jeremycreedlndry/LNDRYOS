@@ -12,13 +12,19 @@ import type { StaffPermissions, StaffRole } from '@laundry/db'
 // ─── Permission definitions ───────────────────────────────────────────────────
 
 const PERMISSION_DEFS: { key: keyof StaffPermissions; label: string; description: string }[] = [
-  { key: 'pos',       label: 'POS',         description: 'Create orders and process payments' },
-  { key: 'orders',    label: 'Orders',       description: 'View and manage all orders' },
-  { key: 'customers', label: 'Customers',    description: 'View and edit customer records' },
-  { key: 'reports',   label: 'Reports',      description: 'View sales and activity reports' },
-  { key: 'settings',  label: 'Settings',     description: 'Manage store settings and catalog' },
-  { key: 'staff',     label: 'Staff',        description: 'Invite and manage staff members' },
-  { key: 'equipment', label: 'Equipment',    description: 'View and manage machines' },
+  { key: 'pos',              label: 'POS',                      description: 'Create orders and process payments' },
+  { key: 'orders',           label: 'Orders',                   description: 'View and manage all orders' },
+  { key: 'delete_orders',    label: 'Delete Orders',            description: 'Permanently remove orders from the system' },
+  { key: 'edit_paid_orders', label: 'Edit Paid Orders',         description: 'Modify orders that have already been paid' },
+  { key: 'customers',        label: 'Customers',                description: 'View and edit customer records' },
+  { key: 'add_customers',    label: 'Add Customers',            description: 'Create new customer profiles' },
+  { key: 'edit_customers',   label: 'Edit Customers',           description: 'Edit existing customer profiles and preferences' },
+  { key: 'add_credits',      label: 'Add Credits',              description: 'Add credits or adjustments to customer accounts' },
+  { key: 'manage_invoices',  label: 'Manage Invoices',          description: 'Create, edit, and send customer invoices' },
+  { key: 'reports',          label: 'Reports',                  description: 'View sales and activity reports' },
+  { key: 'settings',         label: 'Settings',                 description: 'Manage store settings and catalog' },
+  { key: 'staff',            label: 'Staff',                    description: 'Invite and manage staff members' },
+  { key: 'equipment',        label: 'Equipment',                description: 'View and manage machines' },
 ]
 
 const ROLE_LABELS: Record<StaffRole, string> = {
@@ -167,7 +173,7 @@ function PermissionsModal({
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
         </div>
-        <div className="p-4 space-y-1">
+        <div className="p-4 space-y-1 overflow-y-auto max-h-[60vh]">
           {isOwner && (
             <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
               Owners have full access to all features.

@@ -126,13 +126,19 @@ export interface TenantAddress {
 export type StaffRole = 'owner' | 'manager' | 'staff'
 
 export interface StaffPermissions {
-  pos?:       boolean
-  orders?:    boolean
-  customers?: boolean
-  reports?:   boolean
-  settings?:  boolean
-  staff?:     boolean
-  equipment?: boolean
+  pos?:              boolean
+  orders?:           boolean
+  delete_orders?:    boolean
+  edit_paid_orders?: boolean
+  customers?:        boolean
+  add_customers?:    boolean
+  edit_customers?:   boolean
+  add_credits?:      boolean
+  manage_invoices?:  boolean
+  reports?:          boolean
+  settings?:         boolean
+  staff?:            boolean
+  equipment?:        boolean
 }
 
 export interface TenantMember {

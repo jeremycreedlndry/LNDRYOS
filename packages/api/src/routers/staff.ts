@@ -3,13 +3,19 @@ import { TRPCError } from '@trpc/server'
 import { router, tenantProcedure } from '../trpc'
 
 const permissionsSchema = z.object({
-  pos:       z.boolean().optional(),
-  orders:    z.boolean().optional(),
-  customers: z.boolean().optional(),
-  reports:   z.boolean().optional(),
-  settings:  z.boolean().optional(),
-  staff:     z.boolean().optional(),
-  equipment: z.boolean().optional(),
+  pos:              z.boolean().optional(),
+  orders:           z.boolean().optional(),
+  delete_orders:    z.boolean().optional(),
+  edit_paid_orders: z.boolean().optional(),
+  customers:        z.boolean().optional(),
+  add_customers:    z.boolean().optional(),
+  edit_customers:   z.boolean().optional(),
+  add_credits:      z.boolean().optional(),
+  manage_invoices:  z.boolean().optional(),
+  reports:          z.boolean().optional(),
+  settings:         z.boolean().optional(),
+  staff:            z.boolean().optional(),
+  equipment:        z.boolean().optional(),
 })
 
 export const staffRouter = router({

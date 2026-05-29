@@ -163,7 +163,10 @@ export default function PickupsPage() {
   const [declineId, setDeclineId] = useState<string | null>(null)
   const [declineReason, setDeclineReason] = useState('')
   const [editId, setEditId] = useState<string | null>(null)
-  const [editFields, setEditFields] = useState({ scheduled_date: '', time_start: '', time_end: '', notes: '' })
+  const [editFields, setEditFields] = useState({
+    scheduled_date: '', time_start: '', time_end: '', notes: '',
+    delivery_date: '', delivery_time_start: '', delivery_time_end: '',
+  })
   const [skippedOpen, setSkippedOpen] = useState(false)
   const [typeFilter, setTypeFilter] = useState<'all' | 'pickup' | 'delivery'>('all')
 
@@ -201,6 +204,10 @@ export default function PickupsPage() {
   })
   const patchStop = trpc.pickupStops.patchStop.useMutation({
     onSuccess: () => { utils.pickupStops.listByDate.invalidate(); utils.pickupStops.listPendingRequests.invalidate(); toast.success('Stop updated'); setEditId(null) },
+    onError: (e) => toast.error(e.message),
+  })
+  // Second instance — patches delivery stop without triggering close/toast (handled by patchStop's onSuccess)
+  const patchDeliveryStop = trpc.pickupStops.patchStop.useMutation({
     onError: (e) => toast.error(e.message),
   })
 
@@ -488,44 +495,85 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
                       {s.notes && <p className="text-xs text-gray-400 mt-0.5 italic">"{s.notes}"</p>}
                     </div>
                     {editId === s.id ? (
-                      <div className="space-y-2 pt-1">
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <div className="col-span-2">
-                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Date</label>
-                            <input
-                              type="date"
-                              value={editFields.scheduled_date}
-                              onChange={(e) => setEditFields((f) => ({ ...f, scheduled_date: e.target.value }))}
-                              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
-                            />
+                      <div className="space-y-3 pt-1">
+                        {/* Pickup section */}
+                        <div>
+                          <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wide mb-1.5">↑ Pickup</p>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <div className="col-span-2">
+                              <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Date</label>
+                              <input
+                                type="date"
+                                value={editFields.scheduled_date}
+                                onChange={(e) => setEditFields((f) => ({ ...f, scheduled_date: e.target.value }))}
+                                className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">From</label>
+                              <input
+                                type="time"
+                                value={editFields.time_start}
+                                onChange={(e) => setEditFields((f) => ({ ...f, time_start: e.target.value }))}
+                                className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">To</label>
+                              <input
+                                type="time"
+                                value={editFields.time_end}
+                                onChange={(e) => setEditFields((f) => ({ ...f, time_end: e.target.value }))}
+                                className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                              />
+                            </div>
                           </div>
+                        </div>
+                        {/* Delivery section */}
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        {(s as any).delivery && (
                           <div>
-                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">From</label>
-                            <input
-                              type="time"
-                              value={editFields.time_start}
-                              onChange={(e) => setEditFields((f) => ({ ...f, time_start: e.target.value }))}
-                              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
-                            />
+                            <p className="text-[10px] font-bold text-purple-600 uppercase tracking-wide mb-1.5">↓ Delivery</p>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <div className="col-span-2">
+                                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Date</label>
+                                <input
+                                  type="date"
+                                  value={editFields.delivery_date}
+                                  onChange={(e) => setEditFields((f) => ({ ...f, delivery_date: e.target.value }))}
+                                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">From</label>
+                                <input
+                                  type="time"
+                                  value={editFields.delivery_time_start}
+                                  onChange={(e) => setEditFields((f) => ({ ...f, delivery_time_start: e.target.value }))}
+                                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">To</label>
+                                <input
+                                  type="time"
+                                  value={editFields.delivery_time_end}
+                                  onChange={(e) => setEditFields((f) => ({ ...f, delivery_time_end: e.target.value }))}
+                                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                                />
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">To</label>
-                            <input
-                              type="time"
-                              value={editFields.time_end}
-                              onChange={(e) => setEditFields((f) => ({ ...f, time_end: e.target.value }))}
-                              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300"
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Notes</label>
-                            <textarea
-                              value={editFields.notes}
-                              onChange={(e) => setEditFields((f) => ({ ...f, notes: e.target.value }))}
-                              rows={2}
-                              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300 resize-none"
-                            />
-                          </div>
+                        )}
+                        {/* Notes */}
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Notes</label>
+                          <textarea
+                            value={editFields.notes}
+                            onChange={(e) => setEditFields((f) => ({ ...f, notes: e.target.value }))}
+                            rows={2}
+                            className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-300 resize-none"
+                          />
                         </div>
                         <div className="flex gap-1.5">
                           <button onClick={() => setEditId(null)}
@@ -533,8 +581,20 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
                             Cancel
                           </button>
                           <button
-                            onClick={() => patchStop.mutate({ id: s.id, scheduled_date: editFields.scheduled_date || undefined, time_start: editFields.time_start || null, time_end: editFields.time_end || null, notes: editFields.notes || null })}
-                            disabled={patchStop.isPending}
+                            onClick={async () => {
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                              const deliveryId = (s as any).delivery?.id
+                              if (deliveryId) {
+                                await patchDeliveryStop.mutateAsync({
+                                  id: deliveryId,
+                                  scheduled_date: editFields.delivery_date || undefined,
+                                  time_start: editFields.delivery_time_start || null,
+                                  time_end: editFields.delivery_time_end || null,
+                                })
+                              }
+                              patchStop.mutate({ id: s.id, scheduled_date: editFields.scheduled_date || undefined, time_start: editFields.time_start || null, time_end: editFields.time_end || null, notes: editFields.notes || null })
+                            }}
+                            disabled={patchStop.isPending || patchDeliveryStop.isPending}
                             className="flex-1 rounded-lg border border-brand-200 bg-brand-50 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50">
                             Save Changes
                           </button>
@@ -572,7 +632,7 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
                         </button>
                         <button
                           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                          onClick={() => { setEditId(s.id); setEditFields({ scheduled_date: (s as any).scheduled_date ?? '', time_start: s.time_start ?? '', time_end: s.time_end ?? '', notes: s.notes ?? '' }) }}
+                          onClick={() => { setEditId(s.id); setEditFields({ scheduled_date: (s as any).scheduled_date ?? '', time_start: s.time_start ?? '', time_end: s.time_end ?? '', notes: s.notes ?? '', delivery_date: (s as any).delivery?.scheduled_date ?? '', delivery_time_start: (s as any).delivery?.time_start ?? '', delivery_time_end: (s as any).delivery?.time_end ?? '' }) }}
                           className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">
                           Edit
                         </button>

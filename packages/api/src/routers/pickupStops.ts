@@ -87,11 +87,11 @@ export const pickupStopsRouter = router({
 
       // Fetch linked delivery stops so the card can show the full booking
       const orderIds = pickups.map((s) => s.order_id).filter(Boolean) as string[]
-      const deliveryMap: Record<string, { scheduled_date: string; time_start: string | null; time_end: string | null }> = {}
+      const deliveryMap: Record<string, { id: string; scheduled_date: string; time_start: string | null; time_end: string | null }> = {}
       if (orderIds.length > 0) {
         const { data: deliveries } = await ctx.supabase
           .from('pickup_stops')
-          .select('order_id, scheduled_date, time_start, time_end')
+          .select('id, order_id, scheduled_date, time_start, time_end')
           .in('order_id', orderIds)
           .eq('type', 'delivery')
           .eq('tenant_id', ctx.tenantId)

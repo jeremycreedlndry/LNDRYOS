@@ -46,6 +46,24 @@ export async function POST(req: NextRequest) {
 
   const customerId = (ctx.customer as { id: string }).id
 
+  // Backfill blank name from auth user metadata so the request card shows
+  // the customer's name immediately (without waiting for GET /me to self-heal)
+  if (!(ctx.customer as { first_name?: string }).first_name) {
+    const token = req.headers.get('authorization')?.replace('Bearer ', '').trim()
+    if (token) {
+      const { data: { user: authUser } } = await ctx.supabase.auth.getUser(token)
+      const fullName = (authUser?.user_metadata as { full_name?: string } | undefined)?.full_name?.trim()
+      if (fullName) {
+        const parts = fullName.split(' ')
+        await ctx.supabase
+          .from('customers')
+          .update({ first_name: parts[0], last_name: parts.slice(1).join(' ') })
+          .eq('id', customerId)
+          .eq('tenant_id', ctx.tenantId)
+      }
+    }
+  }
+
   // Resolve delivery fee for this customer
   const deliveryFeeCents = (ctx.customer as { delivery_fee_cents?: number | null }).delivery_fee_cents
   let resolvedDeliveryFee = 0
@@ -76,14 +94,9 @@ export async function POST(req: NextRequest) {
   }
   const orderNumber = `ORD-${String(nextNum).padStart(5, '0')}`
 
-  // Build order notes from tier + preferences
+  // Build order notes from tier + bag count + any customer-entered note only (not preferences — those go on the customer profile)
   const tierLabel = tier === 'basic' ? 'Basic Wash & Fold' : tier === 'standard' ? 'Standard Wash & Fold' : 'Premium Wash & Fold'
-  const prefNotes = preferences
-    ? Object.entries(preferences as Record<string, unknown>)
-        .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
-        .join(', ')
-    : ''
-  const orderNotes = [tierLabel, bag_count ? `${bag_count} bag${bag_count > 1 ? 's' : ''}` : '', prefNotes, notes]
+  const orderNotes = [tierLabel, bag_count ? `${bag_count} bag${bag_count > 1 ? 's' : ''}` : '', notes]
     .filter(Boolean).join(' · ')
 
   // Create order
@@ -109,23 +122,28 @@ export async function POST(req: NextRequest) {
 
   if (orderError) return NextResponse.json({ error: orderError.message }, { status: 500, headers: CORS_HEADERS })
 
-  // Save preferences back to customer profile
+  // Save preferences to customer profile order_preferences JSONB
+  // (customer app key → DB key mapping)
   if (preferences) {
-    const prefMap: Record<string, string> = {
-      wash_temp:       'pref_wash_temperature',
-      bleach:          'pref_bleach',
-      dryer_sheets:    'pref_dryer_sheets',
-      detergent_type:  'pref_detergent_type',
-      fabric_softener: 'pref_fabric_softener',
-    }
-    const prefUpdates: Record<string, string> = {}
-    for (const [key, col] of Object.entries(prefMap)) {
-      if ((preferences as Record<string, string>)[key]) {
-        prefUpdates[col] = (preferences as Record<string, string>)[key]
-      }
-    }
-    if (Object.keys(prefUpdates).length > 0) {
-      await ctx.supabase.from('customers').update(prefUpdates).eq('id', customerId).eq('tenant_id', ctx.tenantId)
+    const p = preferences as Record<string, string>
+    const orderPreferences: Record<string, string> = {}
+    if (p.wash_temp)       orderPreferences.wash_temperature = p.wash_temp
+    if (p.detergent_type)  orderPreferences.detergent_type   = p.detergent_type
+    if (p.bleach)          orderPreferences.bleach           = p.bleach
+    if (p.dryer_sheets)    orderPreferences.dryer_sheets     = p.dryer_sheets
+    if (p.fabric_softener) orderPreferences.fabric_softener  = p.fabric_softener
+    if (p.dryer)           orderPreferences.dryer            = p.dryer
+
+    if (Object.keys(orderPreferences).length > 0) {
+      console.log('[book] saving order_preferences:', JSON.stringify(orderPreferences), 'for customer:', customerId, 'tenant:', ctx.tenantId)
+      const { data: prefData, error: prefError } = await ctx.supabase
+        .from('customers')
+        .update({ order_preferences: orderPreferences })
+        .eq('id', customerId)
+        .eq('tenant_id', ctx.tenantId)
+        .select('id, order_preferences')
+      if (prefError) console.error('[book] order_preferences update failed:', prefError.message)
+      else console.log('[book] order_preferences updated rows:', prefData?.length ?? 0, prefData)
     }
   }
 

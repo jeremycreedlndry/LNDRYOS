@@ -556,14 +556,14 @@ async function sendDeclineNotification(supabase: any, tenantId: string, stop: an
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function ensurePickupOrderDetail(supabase: any, tenantId: string, stop: any) {
-  // If already has an order, just set it to pending ("Detail")
+  // If already has an order, advance it to in_progress (laundry has been picked up)
   if (stop.order_id) {
     await supabase
       .from('orders')
-      .update({ status: 'pending' })
+      .update({ status: 'in_progress' })
       .eq('id', stop.order_id)
       .eq('tenant_id', tenantId)
-      .in('status', ['pending']) // only update if still in pending (don't downgrade)
+      .in('status', ['pending']) // only advance from pending — don't downgrade cleaning/ready
     return
   }
 

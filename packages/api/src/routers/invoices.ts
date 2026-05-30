@@ -28,7 +28,7 @@ export const invoicesRouter = router({
 
   list: tenantProcedure
     .input(z.object({
-      status:         z.enum(['all', 'draft', 'unpaid', 'paid', 'void']).default('unpaid'),
+      status:         z.enum(['all', 'draft', 'unpaid', 'partial', 'paid', 'void']).default('unpaid'),
       recipient_type: z.enum(['all', 'customer', 'business_account']).default('all'),
     }).optional())
     .query(async ({ ctx, input }) => {
@@ -36,14 +36,16 @@ export const invoicesRouter = router({
         .from('invoices')
         .select(`
           id, invoice_number, recipient_type, status,
-          issue_date, due_date, total_cents, sent_at, paid_at, created_at,
+          issue_date, due_date, total_cents, paid_amount_cents, sent_at, paid_at, created_at,
           customer:customers(id, first_name, last_name, email),
           business_account:business_accounts(id, name, email)
         `)
         .eq('tenant_id', ctx.tenantId)
         .order('created_at', { ascending: false })
 
-      if (input?.status && input.status !== 'all') q = q.eq('status', input.status)
+      // 'unpaid' filter should also show partial invoices
+      if (input?.status === 'unpaid') q = q.in('status', ['unpaid', 'partial'])
+      else if (input?.status && input.status !== 'all') q = q.eq('status', input.status)
       if (input?.recipient_type && input.recipient_type !== 'all') q = q.eq('recipient_type', input.recipient_type)
 
       const { data, error } = await q
@@ -59,7 +61,7 @@ export const invoicesRouter = router({
       const { data: inv, error } = await ctx.supabase
         .from('invoices')
         .select(`
-          *,
+          *, paid_amount_cents,
           customer:customers(id, first_name, last_name, email, phone, address_street, address_city, address_postal_code),
           business_account:business_accounts(id, name, email, phone, address, city, province, postal_code, payment_terms_days)
         `)
@@ -246,30 +248,34 @@ export const invoicesRouter = router({
       notes:        z.string().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Get invoice total
+      // Get invoice with current paid amount
       const { data: inv } = await ctx.supabase
         .from('invoices')
-        .select('id, total_cents, status')
+        .select('id, total_cents, paid_amount_cents, status')
         .eq('id', input.invoice_id)
         .eq('tenant_id', ctx.tenantId)
         .single()
 
       if (!inv) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      // Mark invoice paid if payment covers the balance
-      const newStatus = input.amount_cents >= inv.total_cents ? 'paid' : 'unpaid'
+      // Accumulate payments and derive status from remaining balance
+      const newPaidAmount = (inv.paid_amount_cents ?? 0) + input.amount_cents
+      const balance = inv.total_cents - newPaidAmount
+      const newStatus = balance <= 0 ? 'paid' : newPaidAmount > 0 ? 'partial' : 'unpaid'
+
       const { error } = await ctx.supabase
         .from('invoices')
         .update({
-          status:     newStatus,
-          paid_at:    newStatus === 'paid' ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
+          paid_amount_cents: newPaidAmount,
+          status:            newStatus,
+          paid_at:           newStatus === 'paid' ? new Date().toISOString() : null,
+          updated_at:        new Date().toISOString(),
         })
         .eq('id', input.invoice_id)
         .eq('tenant_id', ctx.tenantId)
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
-      return { success: true, status: newStatus }
+      return { success: true, status: newStatus, balance_cents: Math.max(0, balance) }
     }),
 
   // ── Send invoice email (CC + e-Transfer options) ─────────────────────────────

@@ -8,7 +8,7 @@ import toast from 'react-hot-toast'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type InvoiceStatus = 'draft' | 'unpaid' | 'paid' | 'void'
+type InvoiceStatus = 'draft' | 'unpaid' | 'partial' | 'paid' | 'void'
 type RecipientType = 'customer' | 'business_account'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -16,8 +16,17 @@ type RecipientType = 'customer' | 'business_account'
 const STATUS_STYLES: Record<InvoiceStatus, string> = {
   draft:   'bg-gray-100 text-gray-600',
   unpaid:  'bg-amber-100 text-amber-700',
+  partial: 'bg-blue-100 text-blue-700',
   paid:    'bg-green-100 text-green-700',
   void:    'bg-red-100 text-red-600',
+}
+
+const STATUS_LABELS: Record<InvoiceStatus, string> = {
+  draft:   'Draft',
+  unpaid:  'Unpaid',
+  partial: 'Partial',
+  paid:    'Paid',
+  void:    'Void',
 }
 
 function fmtDate(iso: string | null | undefined) {
@@ -337,12 +346,13 @@ function RecordPaymentModal({
   onClose,
   onSaved,
 }: {
-  invoice: { id: string; invoice_number: string; total_cents: number }
+  invoice: { id: string; invoice_number: string; total_cents: number; paid_amount_cents: number }
   onClose: () => void
   onSaved: () => void
 }) {
   const utils = trpc.useUtils()
-  const [amount, setAmount] = useState((invoice.total_cents / 100).toFixed(2))
+  const balance = invoice.total_cents - invoice.paid_amount_cents
+  const [amount, setAmount] = useState((balance / 100).toFixed(2))
   const [method, setMethod] = useState<'cash' | 'e_transfer' | 'cheque' | 'direct_deposit' | 'card_present' | 'card_online'>('e_transfer')
 
   const METHODS = [
@@ -367,7 +377,10 @@ function RecordPaymentModal({
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
         </div>
         <div className="p-6 space-y-4">
-          <p className="text-sm text-gray-500">Invoice <strong>{invoice.invoice_number}</strong></p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-500">Invoice <strong>{invoice.invoice_number}</strong></p>
+            <p className="text-sm font-semibold text-gray-700">Balance due: {formatCurrency(balance)}</p>
+          </div>
           <div>
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Amount</label>
             <div className="relative">
@@ -551,8 +564,21 @@ function InvoiceDetailModal({ invoiceId, onClose }: { invoiceId: string; onClose
                 <span>{taxName}</span><span>{formatCurrency(inv.tax_cents)}</span>
               </div>
             )}
-            <div className="flex justify-between text-base font-bold text-gray-900 border-t border-gray-200 pt-2 mt-2">
-              <span>Total Due</span><span>{formatCurrency(inv.total_cents)}</span>
+            <div className="flex justify-between text-sm font-semibold text-gray-700 border-t border-gray-200 pt-2 mt-2">
+              <span>Invoice Total</span><span>{formatCurrency(inv.total_cents)}</span>
+            </div>
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {(inv as any).paid_amount_cents > 0 && (
+              <div className="flex justify-between text-sm text-green-700">
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                <span>Paid</span><span>−{formatCurrency((inv as any).paid_amount_cents)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-base font-bold text-gray-900 border-t border-gray-200 pt-2 mt-1">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              <span>{(inv as any).paid_amount_cents > 0 ? 'Balance Due' : 'Total Due'}</span>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              <span>{formatCurrency(Math.max(0, inv.total_cents - ((inv as any).paid_amount_cents ?? 0)))}</span>
             </div>
             {taxId && (
               <p className="text-xs text-gray-400 text-right mt-1">HST #: {taxId}</p>
@@ -577,7 +603,7 @@ export default function InvoicesPage() {
   const utils = trpc.useUtils()
   const [statusFilter, setStatusFilter] = useState<'unpaid' | 'all'>('unpaid')
   const [showNewModal, setShowNewModal] = useState(false)
-  const [payingInvoice, setPayingInvoice] = useState<{ id: string; invoice_number: string; total_cents: number } | null>(null)
+  const [payingInvoice, setPayingInvoice] = useState<{ id: string; invoice_number: string; total_cents: number; paid_amount_cents: number } | null>(null)
   const [viewingInvoiceId, setViewingInvoiceId] = useState<string | null>(null)
 
   const { data: invoices = [], isLoading } = trpc.invoices.list.useQuery(
@@ -597,12 +623,14 @@ export default function InvoicesPage() {
 
   const rows = invoices as unknown as {
     id: string; invoice_number: string; recipient_type: string; status: InvoiceStatus
-    issue_date: string; due_date: string | null; total_cents: number; sent_at: string | null; paid_at: string | null; created_at: string
+    issue_date: string; due_date: string | null; total_cents: number; paid_amount_cents: number; sent_at: string | null; paid_at: string | null; created_at: string
     customer?: { first_name: string; last_name: string; email: string | null } | null
     business_account?: { name: string; email: string | null } | null
   }[]
 
-  const totalUnpaid = rows.filter((r) => r.status === 'unpaid').reduce((s, r) => s + r.total_cents, 0)
+  const totalUnpaid = rows
+    .filter((r) => r.status === 'unpaid' || r.status === 'partial')
+    .reduce((s, r) => s + (r.total_cents - r.paid_amount_cents), 0)
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -678,10 +706,19 @@ export default function InvoicesPage() {
                       )}>{fmtDate(inv.due_date)}</span>
                     ) : '—'}
                   </td>
-                  <td className="px-4 py-3 font-semibold text-gray-900">{formatCurrency(inv.total_cents)}</td>
+                  <td className="px-4 py-3 font-semibold text-gray-900">
+                    {inv.paid_amount_cents > 0 && inv.status !== 'paid' ? (
+                      <span title={`Total: ${formatCurrency(inv.total_cents)} · Paid: ${formatCurrency(inv.paid_amount_cents)}`}>
+                        {formatCurrency(inv.total_cents - inv.paid_amount_cents)}
+                        <span className="ml-1 text-xs font-normal text-gray-400">due</span>
+                      </span>
+                    ) : (
+                      formatCurrency(inv.total_cents)
+                    )}
+                  </td>
                   <td className="px-4 py-3">
-                    <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize', STATUS_STYLES[inv.status])}>
-                      {inv.status}
+                    <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-semibold', STATUS_STYLES[inv.status])}>
+                      {STATUS_LABELS[inv.status]}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-400">{daysAgo(inv.sent_at) ?? '—'}</td>
@@ -699,8 +736,8 @@ export default function InvoicesPage() {
                           <Send className="h-3.5 w-3.5" /> Send
                         </button>
                       )}
-                      {inv.status === 'unpaid' && (
-                        <button onClick={() => setPayingInvoice({ id: inv.id, invoice_number: inv.invoice_number, total_cents: inv.total_cents })}
+                      {(inv.status === 'unpaid' || inv.status === 'partial') && (
+                        <button onClick={() => setPayingInvoice({ id: inv.id, invoice_number: inv.invoice_number, total_cents: inv.total_cents, paid_amount_cents: inv.paid_amount_cents })}
                           className="rounded-lg px-2.5 py-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 hover:bg-green-100 flex items-center gap-1">
                           <CreditCard className="h-3.5 w-3.5" /> Payment
                         </button>

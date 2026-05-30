@@ -275,7 +275,34 @@ export const invoicesRouter = router({
         .eq('tenant_id', ctx.tenantId)
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+
+      // Record individual payment in history
+      await ctx.supabase.from('invoice_payments').insert({
+        tenant_id:    ctx.tenantId,
+        invoice_id:   input.invoice_id,
+        amount_cents: input.amount_cents,
+        method:       input.method,
+        notes:        input.notes ?? null,
+        recorded_by:  ctx.userId,
+      })
+
       return { success: true, status: newStatus, balance_cents: Math.max(0, balance) }
+    }),
+
+  // ── Payment history for a single invoice ─────────────────────────────────
+
+  listPayments: tenantProcedure
+    .input(z.object({ invoice_id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('invoice_payments')
+        .select('id, amount_cents, method, notes, created_at, recorded_by')
+        .eq('invoice_id', input.invoice_id)
+        .eq('tenant_id', ctx.tenantId)
+        .order('created_at', { ascending: true })
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return data ?? []
     }),
 
   // ── Send invoice email (CC + e-Transfer options) ─────────────────────────────

@@ -419,8 +419,20 @@ function RecordPaymentModal({
 
 // ─── Invoice Detail Modal ─────────────────────────────────────────────────────
 
+const METHOD_LABELS: Record<string, string> = {
+  cash:           'Cash',
+  card_present:   'Card (in person)',
+  card_online:    'Card (online)',
+  account_credit: 'Account Credit',
+  e_transfer:     'e-Transfer',
+  cheque:         'Cheque',
+  direct_deposit: 'Direct Deposit',
+  invoice:        'Invoice',
+}
+
 function InvoiceDetailModal({ invoiceId, onClose }: { invoiceId: string; onClose: () => void }) {
   const { data: inv, isLoading, error } = trpc.invoices.get.useQuery({ id: invoiceId })
+  const { data: payments = [] } = trpc.invoices.listPayments.useQuery({ invoice_id: invoiceId })
 
   if (isLoading || (!inv && !error)) {
     return (
@@ -590,6 +602,30 @@ function InvoiceDetailModal({ invoiceId, onClose }: { invoiceId: string; onClose
           <div className="px-8 pb-4">
             <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">Notes</p>
             <p className="text-sm text-gray-600">{inv.notes}</p>
+          </div>
+        )}
+
+        {/* Payment history */}
+        {payments.length > 0 && (
+          <div className="px-8 pb-6 border-t border-gray-100 pt-4">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Payment History</p>
+            <div className="space-y-1">
+              {(payments as { id: string; amount_cents: number; method: string; notes: string | null; created_at: string }[]).map((p) => (
+                <div key={p.id} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <CreditCard className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-gray-700">{METHOD_LABELS[p.method] ?? p.method}</p>
+                      {p.notes && <p className="text-xs text-gray-400 truncate">{p.notes}</p>}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 ml-4">
+                    <p className="text-sm font-semibold text-green-700">{formatCurrency(p.amount_cents)}</p>
+                    <p className="text-xs text-gray-400">{fmtDate(p.created_at)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

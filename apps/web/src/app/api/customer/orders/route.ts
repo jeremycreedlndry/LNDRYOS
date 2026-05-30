@@ -38,7 +38,8 @@ export async function GET(req: NextRequest) {
         scheduled_date,
         time_start,
         time_end,
-        completed_at
+        completed_at,
+        photo_url
       )
     `)
     .eq('customer_id', customerId)

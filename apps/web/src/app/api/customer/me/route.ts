@@ -65,8 +65,10 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { first_name, last_name, phone, address_street, address_city, address_postal } = body
+  const { first_name, last_name, phone, address_street, address_city, address_postal, notification_preference } = body
   // address_province is not a DB column (always Ontario) — ignore if sent
+
+  const VALID_NOTIF_PREFS = ['sms_email', 'sms', 'email', 'none']
 
   const updates: Record<string, unknown> = {}
   if (first_name !== undefined) updates.first_name = first_name
@@ -75,6 +77,9 @@ export async function PATCH(req: NextRequest) {
   if (address_street !== undefined) updates.address_street = address_street
   if (address_city !== undefined) updates.address_city = address_city
   if (address_postal !== undefined) updates.address_postal_code = address_postal
+  if (notification_preference !== undefined && VALID_NOTIF_PREFS.includes(notification_preference)) {
+    updates.notification_preference = notification_preference
+  }
 
   const { data, error } = await ctx.supabase
     .from('customers')

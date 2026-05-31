@@ -173,6 +173,166 @@ export const equipmentRouter = router({
       return { created, updated, skipped }
     }),
 
+  // ── Load-based workflow ────────────────────────────────────────────────────
+  // Called when an order is first dragged into Washers.
+  // Creates one order_load per machine and mirrors into order_equipment_assignments.
+  createLoads: tenantProcedure
+    .input(z.object({
+      order_id: z.string().uuid(),
+      machines: z.array(z.object({
+        equipment_id:    z.string().uuid(),
+        duration_minutes: z.number().int().nullable().optional(),
+        temperature:     z.string().nullable().optional(),
+      })).min(1),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const now = new Date().toISOString()
+
+      // Delete any existing loads for this order (re-assigning to washers resets)
+      await ctx.supabase
+        .from('order_loads')
+        .delete()
+        .eq('order_id', input.order_id)
+        .eq('tenant_id', ctx.tenantId)
+
+      // Create one load per machine
+      const loads = input.machines.map((m, i) => ({
+        order_id:        input.order_id,
+        tenant_id:       ctx.tenantId,
+        load_number:     i + 1,
+        stage:           'washing',
+        equipment_id:    m.equipment_id,
+        duration_minutes: m.duration_minutes ?? null,
+        temperature:     m.temperature ?? null,
+        assigned_at:     now,
+      }))
+
+      const { error: loadsErr } = await ctx.supabase
+        .from('order_loads')
+        .insert(loads)
+      if (loadsErr) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: loadsErr.message })
+
+      // Mirror into order_equipment_assignments so Machine View stays accurate
+      await ctx.supabase
+        .from('order_equipment_assignments')
+        .delete()
+        .eq('order_id', input.order_id)
+        .eq('tenant_id', ctx.tenantId)
+
+      const assignments = input.machines.map((m) => ({
+        order_id:        input.order_id,
+        equipment_id:    m.equipment_id,
+        tenant_id:       ctx.tenantId,
+        assigned_by:     ctx.userId,
+        duration_minutes: m.duration_minutes ?? null,
+        temperature:     m.temperature ?? null,
+        assigned_at:     now,
+      }))
+
+      const { error: aErr } = await ctx.supabase
+        .from('order_equipment_assignments')
+        .insert(assignments)
+      if (aErr) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: aErr.message })
+
+      return { success: true }
+    }),
+
+  // Advance a single load to the next stage.
+  // washing → drying | drying → folding | folding → ready
+  // When going to 'ready', if all loads are done the order status is set to 'ready'.
+  moveLoad: tenantProcedure
+    .input(z.object({
+      load_id:          z.string().uuid(),
+      equipment_id:     z.string().uuid().optional(), // omit when advancing to ready
+      duration_minutes: z.number().int().nullable().optional(),
+      temperature:      z.string().nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { data: load, error: loadErr } = await ctx.supabase
+        .from('order_loads')
+        .select('*')
+        .eq('id', input.load_id)
+        .eq('tenant_id', ctx.tenantId)
+        .single()
+      if (loadErr || !load) throw new TRPCError({ code: 'NOT_FOUND' })
+
+      const STAGE_MAP: Record<string, string> = {
+        washing: 'drying',
+        drying:  'folding',
+        folding: 'ready',
+      }
+      const nextStage = STAGE_MAP[load.stage as string]
+      if (!nextStage) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Load is already complete' })
+
+      const now        = new Date().toISOString()
+      const isReady    = nextStage === 'ready'
+      const newEquipId = isReady ? null : (input.equipment_id ?? null)
+
+      // Advance the load
+      const { error: updateErr } = await ctx.supabase
+        .from('order_loads')
+        .update({
+          stage:           nextStage,
+          equipment_id:    newEquipId,
+          duration_minutes: isReady ? null : (input.duration_minutes ?? null),
+          temperature:     isReady ? null : (input.temperature ?? null),
+          assigned_at:     now,
+        })
+        .eq('id', input.load_id)
+        .eq('tenant_id', ctx.tenantId)
+      if (updateErr) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: updateErr.message })
+
+      // Sync assignments: remove the old machine row, add the new one
+      if (load.equipment_id) {
+        await ctx.supabase
+          .from('order_equipment_assignments')
+          .delete()
+          .eq('order_id', load.order_id as string)
+          .eq('equipment_id', load.equipment_id as string)
+          .eq('tenant_id', ctx.tenantId)
+      }
+      if (newEquipId) {
+        await ctx.supabase
+          .from('order_equipment_assignments')
+          .insert({
+            order_id:        load.order_id,
+            equipment_id:    newEquipId,
+            tenant_id:       ctx.tenantId,
+            assigned_by:     ctx.userId,
+            duration_minutes: input.duration_minutes ?? null,
+            temperature:     input.temperature ?? null,
+            assigned_at:     now,
+          })
+      }
+
+      // If all loads are now ready, mark the order as ready
+      if (isReady) {
+        const { data: remaining } = await ctx.supabase
+          .from('order_loads')
+          .select('id')
+          .eq('order_id', load.order_id as string)
+          .eq('tenant_id', ctx.tenantId)
+          .neq('stage', 'ready')
+
+        if (!remaining || remaining.length === 0) {
+          await ctx.supabase
+            .from('orders')
+            .update({ status: 'ready' })
+            .eq('id', load.order_id as string)
+            .eq('tenant_id', ctx.tenantId)
+
+          // Clear any lingering assignments (should already be gone)
+          await ctx.supabase
+            .from('order_equipment_assignments')
+            .delete()
+            .eq('order_id', load.order_id as string)
+            .eq('tenant_id', ctx.tenantId)
+        }
+      }
+
+      return { success: true }
+    }),
+
   getAssignments: tenantProcedure
     .input(z.object({ order_id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {

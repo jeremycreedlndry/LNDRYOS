@@ -17,6 +17,17 @@ interface MachineAssignment {
   equipment: { id: string; name: string; type: string }
 }
 
+interface OrderLoad {
+  id: string
+  load_number: number
+  stage: 'washing' | 'drying' | 'folding' | 'ready'
+  equipment_id: string | null
+  duration_minutes: number | null
+  temperature: string | null
+  assigned_at: string | null
+  equipment: { id: string; name: string; type: string } | null
+}
+
 interface OrderRow {
   id: string
   order_number: string
@@ -30,6 +41,7 @@ interface OrderRow {
   customer: { first_name: string; last_name: string; phone?: string | null } | null
   lines: { id: string; name: string; category: string; quantity: number; unit_label: string; unit_price: number }[]
   assignments: MachineAssignment[]
+  loads: OrderLoad[]
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -101,6 +113,243 @@ function MachineRow({ assignment }: { assignment: MachineAssignment }) {
   )
 }
 
+// ─── Per-load row inside a board card ────────────────────────────────────────
+
+// Stage of a load → which column it belongs to
+const LOAD_STAGE_COLUMN: Record<string, EquipmentType> = {
+  washing: 'washer',
+  drying:  'dryer',
+  folding: 'folding',
+}
+
+function LoadRow({
+  load,
+  onMoveToNext,
+}: {
+  load: OrderLoad
+  onMoveToNext: (load: OrderLoad) => void   // open MoveLoadModal or direct mark-ready
+}) {
+  const [progress, setProgress] = useState(() => {
+    if (!load.duration_minutes || !load.assigned_at) return null
+    const elapsed = (Date.now() - new Date(load.assigned_at).getTime()) / 60000
+    return Math.min(1, elapsed / load.duration_minutes)
+  })
+
+  useEffect(() => {
+    if (!load.duration_minutes || !load.assigned_at) return
+    const id = setInterval(() => {
+      const elapsed = (Date.now() - new Date(load.assigned_at!).getTime()) / 60000
+      setProgress(Math.min(1, elapsed / load.duration_minutes!))
+    }, 15_000)
+    return () => clearInterval(id)
+  }, [load.assigned_at, load.duration_minutes])
+
+  const done = progress !== null && progress >= 1
+  const pct  = progress !== null ? Math.round(progress * 100) : null
+  const remaining = progress !== null && load.duration_minutes
+    ? Math.max(0, Math.ceil(load.duration_minutes * (1 - progress)))
+    : null
+
+  const nextLabel = load.stage === 'washing' ? '→ Dryers'
+    : load.stage === 'drying' ? '→ Folding'
+    : load.stage === 'folding' ? 'Mark Ready'
+    : null
+
+  if (load.stage === 'ready') return null
+
+  return (
+    <div className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-2 space-y-1.5">
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className={cn(
+            'h-1.5 w-1.5 rounded-full shrink-0',
+            pct === null ? 'bg-gray-400' : done ? 'bg-amber-400' : 'bg-blue-400',
+          )} />
+          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide shrink-0">
+            Load {load.load_number}
+          </span>
+          {load.equipment && (
+            <span className="text-[10px] text-gray-500 truncate">· {load.equipment.name}</span>
+          )}
+          {load.temperature && (
+            <span className="text-[10px] text-gray-400 shrink-0">· {load.temperature}</span>
+          )}
+        </div>
+        <span className={cn('text-[10px] font-semibold shrink-0', done ? 'text-green-600' : 'text-blue-500')}>
+          {done ? 'Done!' : remaining !== null ? `${remaining}m` : ''}
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      {pct !== null && (
+        <div className="relative h-1 overflow-hidden rounded-full bg-blue-100">
+          <div
+            className={cn('absolute inset-y-0 left-0 rounded-full transition-all duration-700',
+              done ? 'bg-green-500' : 'bg-blue-400')}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+
+      {/* Move button */}
+      {nextLabel && (
+        <button
+          onClick={() => onMoveToNext(load)}
+          className={cn(
+            'flex w-full items-center justify-center gap-1 rounded-md py-1 text-[10px] font-semibold transition-colors',
+            load.stage === 'folding'
+              ? 'bg-green-50 border border-green-200 text-green-700 hover:bg-green-100'
+              : 'bg-brand-50 border border-brand-200 text-brand-700 hover:bg-brand-100',
+          )}
+        >
+          {nextLabel}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── Move-load modal (single machine picker for one load) ─────────────────────
+
+function MoveLoadModal({
+  load,
+  allEquipment,
+  busyEquipment,
+  onClose,
+  onSaved,
+}: {
+  load: OrderLoad
+  allEquipment: EquipItem[]
+  busyEquipment: Map<string, string>
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const utils = trpc.useUtils()
+
+  // target type for the next stage
+  const targetType: EquipmentType = load.stage === 'washing' ? 'dryer' : 'folding'
+  const typeLabel  = targetType === 'dryer' ? 'Dryer' : 'Folding Station'
+
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [duration,   setDuration]   = useState<number | null>(null)
+  const [temp,       setTemp]       = useState<string | null>(null)
+
+  const moveLoad = trpc.equipment.moveLoad.useMutation({
+    onSuccess: () => { utils.orders.list.invalidate(); toast.success(`Load ${load.load_number} moved to ${typeLabel}`); onSaved() },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const equipment = sortEquipment(allEquipment.filter((e) => e.type === targetType))
+  const times     = targetType === 'dryer' ? DRYER_TIMES : []
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">
+              Move Load {load.load_number} → {typeLabel}
+            </h2>
+            {load.equipment && (
+              <p className="text-xs text-gray-500 mt-0.5">From {load.equipment.name}</p>
+            )}
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="p-4 space-y-2 max-h-[50vh] overflow-y-auto">
+          {equipment.length === 0 && (
+            <p className="text-sm text-gray-500 text-center py-4">
+              No {typeLabel.toLowerCase()}s set up — add them in Settings → Equipment.
+            </p>
+          )}
+          {equipment.map((item) => {
+            const busy = !selectedId || selectedId !== item.id ? busyEquipment.get(item.id) : undefined
+            const active = selectedId === item.id
+
+            if (busy) {
+              return (
+                <div key={item.id} className="rounded-xl border-2 border-gray-100 bg-gray-50 flex items-center justify-between px-3 py-2.5">
+                  <span className="text-sm font-semibold text-gray-400">{item.name}</span>
+                  <span className="text-xs rounded-full px-2 py-0.5 bg-gray-200 text-gray-400">In use · {busy}</span>
+                </div>
+              )
+            }
+
+            return (
+              <div key={item.id} className={cn('rounded-xl border-2 transition-colors',
+                active ? 'border-brand-400 bg-brand-50' : 'border-gray-200')}>
+                <button onClick={() => setSelectedId(active ? null : item.id)}
+                  className="flex w-full items-center justify-between px-3 py-2.5">
+                  <span className={cn('text-sm font-semibold', active ? 'text-brand-700' : 'text-gray-700')}>
+                    {item.name}
+                  </span>
+                  <span className={cn('text-xs rounded-full px-2 py-0.5 font-medium',
+                    active ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-500')}>
+                    {active ? 'Selected' : 'Tap to select'}
+                  </span>
+                </button>
+
+                {active && times.length > 0 && (
+                  <div className="border-t border-brand-200 px-3 pb-3 pt-2 space-y-2">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 mb-1.5">Time (min)</p>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {times.map((t) => (
+                          <button key={t}
+                            onClick={() => setDuration(duration === t ? null : t)}
+                            className={cn('rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
+                              duration === t
+                                ? 'border-brand-500 bg-brand-600 text-white'
+                                : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}>
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 mb-1.5">Temperature</p>
+                      <div className="flex gap-1.5">
+                        {TEMPS.map((t) => (
+                          <button key={t}
+                            onClick={() => setTemp(temp === t ? null : t)}
+                            className={cn('flex-1 rounded-lg border py-1.5 text-xs font-semibold transition-colors',
+                              temp === t
+                                ? 'border-brand-500 bg-brand-600 text-white'
+                                : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}>
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="flex gap-2 border-t border-gray-100 px-6 py-4">
+          <button onClick={onClose}
+            className="flex-1 rounded-xl border border-gray-200 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              if (!selectedId) return
+              moveLoad.mutate({ load_id: load.id, equipment_id: selectedId, duration_minutes: duration, temperature: temp })
+            }}
+            disabled={!selectedId || moveLoad.isPending}
+            className="flex-1 rounded-xl bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40">
+            {moveLoad.isPending ? 'Moving…' : `Move to ${typeLabel}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Order board card ─────────────────────────────────────────────────────────
 
 // Natural next stage for each column
@@ -112,7 +361,7 @@ const NEXT_STAGE: Partial<Record<string, { type: EquipmentType; label: string } 
 
 function BoardOrderCard({
   order, columnType, isDragging, onDragStart, onDragEnd,
-  onAddAssignment, onMarkCleaned, onMoveNext, onViewDetail,
+  onAddAssignment, onMarkCleaned, onMoveNext, onMoveLoad, onViewDetail,
 }: {
   order: OrderRow
   columnType: 'todo' | EquipmentType | 'completed'
@@ -122,13 +371,22 @@ function BoardOrderCard({
   onAddAssignment?: (order: OrderRow, type: EquipmentType) => void
   onMarkCleaned?: (order: OrderRow) => void
   onMoveNext?: (order: OrderRow, next: EquipmentType | 'ready', clearFrom: EquipmentType) => void
+  onMoveLoad?: (load: OrderLoad) => void
   onViewDetail: (id: string) => void
 }) {
-  const columnAssignments = (columnType === 'todo' || columnType === 'completed')
-    ? []
-    : order.assignments.filter((a) => a.equipment.type === columnType)
+  const hasLoads = (order.loads?.length ?? 0) > 0
 
-  const draggable = columnType !== 'completed'
+  // Loads that belong to this column (by stage)
+  const columnLoads = (hasLoads && columnType !== 'todo' && columnType !== 'completed')
+    ? (order.loads ?? []).filter((l) => LOAD_STAGE_COLUMN[l.stage] === columnType)
+    : []
+
+  // Legacy: assignments for the current column (orders without loads)
+  const columnAssignments = (!hasLoads && columnType !== 'todo' && columnType !== 'completed')
+    ? order.assignments.filter((a) => a.equipment.type === columnType)
+    : []
+
+  const draggable = !hasLoads && columnType !== 'completed'
 
   const customerName = order.customer
     ? `${order.customer.first_name} ${order.customer.last_name}`
@@ -137,8 +395,8 @@ function BoardOrderCard({
   return (
     <div
       draggable={draggable}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      onDragStart={draggable ? onDragStart : undefined}
+      onDragEnd={draggable ? onDragEnd : undefined}
       className={cn(
         'rounded-xl bg-white border border-gray-200 p-3 shadow-sm select-none',
         draggable && 'cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow',
@@ -159,6 +417,20 @@ function BoardOrderCard({
         </p>
       )}
 
+      {/* Load-aware: show per-load sub-cards */}
+      {columnLoads.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-gray-100 space-y-1.5">
+          {columnLoads.map((load) => (
+            <LoadRow
+              key={load.id}
+              load={load}
+              onMoveToNext={(l) => onMoveLoad?.(l)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Legacy: show machine rows (orders without loads) */}
       {columnAssignments.length > 0 && (
         <div className="mt-2 pt-2 border-t border-gray-100 space-y-2">
           {columnAssignments.map((a) => (
@@ -167,9 +439,9 @@ function BoardOrderCard({
         </div>
       )}
 
-      {columnType !== 'todo' && columnType !== 'completed' && (
+      {/* Legacy action buttons (only for non-load orders) */}
+      {!hasLoads && columnType !== 'todo' && columnType !== 'completed' && (
         <div className="mt-2 space-y-1">
-          {/* Add machine (secondary) */}
           {onAddAssignment && (
             <button
               onClick={() => onAddAssignment(order, columnType as EquipmentType)}
@@ -178,7 +450,6 @@ function BoardOrderCard({
               <Plus className="h-3 w-3" /> Add machine
             </button>
           )}
-          {/* Move to next stage */}
           {(() => {
             const next = NEXT_STAGE[columnType]
             if (!next) return null
@@ -219,7 +490,7 @@ function EquipmentColumn({
   type, orders, isDragTarget, draggingOrderId,
   onDragOver, onDragLeave, onDrop,
   onDragStart, onDragEnd,
-  onAddAssignment, onMarkCleaned, onMoveNext, onViewDetail,
+  onAddAssignment, onMarkCleaned, onMoveNext, onMoveLoad, onViewDetail,
 }: {
   type: EquipmentType
   orders: OrderRow[]
@@ -233,6 +504,7 @@ function EquipmentColumn({
   onAddAssignment: (order: OrderRow, type: EquipmentType) => void
   onMarkCleaned: (order: OrderRow) => void
   onMoveNext: (order: OrderRow, next: EquipmentType | 'ready', clearFrom: EquipmentType) => void
+  onMoveLoad: (load: OrderLoad) => void
   onViewDetail: (id: string) => void
 }) {
   const { label, bg, ring, Icon } = COLUMN_CONFIG[type]
@@ -269,6 +541,7 @@ function EquipmentColumn({
             onAddAssignment={onAddAssignment}
             onMarkCleaned={onMarkCleaned}
             onMoveNext={onMoveNext}
+            onMoveLoad={onMoveLoad}
             onViewDetail={onViewDetail}
           />
         ))}
@@ -289,12 +562,14 @@ const TEMPS = ['Cold', 'Warm', 'Hot']
 type AssignmentDetail = { duration_minutes: number | null; temperature: string | null; assigned_at?: string | null }
 
 function MachinesAssignModal({
-  order, filterType, clearFromType, busyEquipment, onClose, onSaved,
+  order, filterType, clearFromType, busyEquipment, mode, onClose, onSaved,
 }: {
   order: OrderRow
   filterType: EquipmentType
   clearFromType?: EquipmentType   // when moving from another column, drop those assignments
   busyEquipment: Map<string, string>
+  /** 'loads' — creates order_loads (first washer assignment); 'assignments' — legacy */
+  mode?: 'loads' | 'assignments'
   onClose: () => void
   onSaved: () => void
 }) {
@@ -357,6 +632,11 @@ function MachinesAssignModal({
 
   const setAssignments = trpc.equipment.setAssignments.useMutation({
     onSuccess: () => { utils.orders.list.invalidate(); toast.success('Equipment updated'); onSaved() },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const createLoads = trpc.equipment.createLoads.useMutation({
+    onSuccess: () => { utils.orders.list.invalidate(); toast.success('Loads created'); onSaved() },
     onError: (e) => toast.error(e.message),
   })
 
@@ -511,13 +791,23 @@ function MachinesAssignModal({
             Cancel
           </button>
           <button
-            onClick={() => setAssignments.mutate({
-              order_id: order.id,
-              assignments: Array.from(details.entries()).map(([equipment_id, d]) => ({ equipment_id, ...d })),
-            })}
-            disabled={setAssignments.isPending}
+            onClick={() => {
+              const entries = Array.from(details.entries())
+              if (mode === 'loads') {
+                createLoads.mutate({
+                  order_id: order.id,
+                  machines: entries.map(([equipment_id, d]) => ({ equipment_id, ...d })),
+                })
+              } else {
+                setAssignments.mutate({
+                  order_id: order.id,
+                  assignments: entries.map(([equipment_id, d]) => ({ equipment_id, ...d })),
+                })
+              }
+            }}
+            disabled={setAssignments.isPending || createLoads.isPending}
             className="flex-1 rounded-xl bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40">
-            {setAssignments.isPending ? 'Saving…' : 'Save'}
+            {(setAssignments.isPending || createLoads.isPending) ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
@@ -747,12 +1037,14 @@ export default function WorkflowPage() {
     { limit: 200 },
     { refetchInterval: 30_000 }
   )
+  const { data: allEquipment = [] } = trpc.equipment.list.useQuery(undefined, { staleTime: 60_000 })
 
   const [viewMode, setViewMode] = useState<'board' | 'machines'>('board')
   const [draggingOrderId, setDraggingOrderId] = useState<string | null>(null)
   const [draggingFromType, setDraggingFromType] = useState<EquipmentType | 'todo' | null>(null)
   const [dragTarget, setDragTarget] = useState<EquipmentType | null>(null)
-  const [assignTarget, setAssignTarget] = useState<{ order: OrderRow; type: EquipmentType; clearFromType?: EquipmentType } | null>(null)
+  const [assignTarget, setAssignTarget] = useState<{ order: OrderRow; type: EquipmentType; clearFromType?: EquipmentType; mode?: 'loads' | 'assignments' } | null>(null)
+  const [moveLoadTarget, setMoveLoadTarget] = useState<OrderLoad | null>(null)
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null)
   const [markCleanedOrder, setMarkCleanedOrder] = useState<OrderRow | null>(null)
 
@@ -766,10 +1058,23 @@ export default function WorkflowPage() {
     o.lines.some((l) => !NON_CLEANING.includes(l.category))
   )
 
-  const toDoOrders = cleaning.filter((o) => !o.assignments || o.assignments.length === 0)
-  const washerOrders = cleaning.filter((o) => o.assignments?.some((a) => a.equipment.type === 'washer'))
-  const dryerOrders = cleaning.filter((o) => o.assignments?.some((a) => a.equipment.type === 'dryer'))
-  const foldingOrders = cleaning.filter((o) => o.assignments?.some((a) => a.equipment.type === 'folding'))
+  // Orders with loads: appear in whichever column(s) their active loads belong to.
+  // Orders without loads: use legacy assignment-based column placement.
+  const toDoOrders = cleaning.filter((o) =>
+    (!o.loads?.length && (!o.assignments || o.assignments.length === 0))
+  )
+  const washerOrders = cleaning.filter((o) =>
+    o.loads?.some((l) => l.stage === 'washing') ||
+    (!o.loads?.length && o.assignments?.some((a) => a.equipment.type === 'washer'))
+  )
+  const dryerOrders = cleaning.filter((o) =>
+    o.loads?.some((l) => l.stage === 'drying') ||
+    (!o.loads?.length && o.assignments?.some((a) => a.equipment.type === 'dryer'))
+  )
+  const foldingOrders = cleaning.filter((o) =>
+    o.loads?.some((l) => l.stage === 'folding') ||
+    (!o.loads?.length && o.assignments?.some((a) => a.equipment.type === 'folding'))
+  )
 
   // All equipment currently in use (maps equipId → orderNumber)
   const busyEquipment = useMemo(() => {
@@ -806,7 +1111,9 @@ export default function WorkflowPage() {
     const clearFromType = (draggingFromType && draggingFromType !== 'todo' && draggingFromType !== type)
       ? draggingFromType as EquipmentType
       : undefined
-    setAssignTarget({ order, type, clearFromType })
+    // Use load mode when dropping a load-less order onto washers for the first time
+    const mode = (type === 'washer' && !order.loads?.length) ? 'loads' : 'assignments'
+    setAssignTarget({ order, type, clearFromType, mode })
     setDraggingOrderId(null)
     setDraggingFromType(null)
     setDragTarget(null)
@@ -827,6 +1134,20 @@ export default function WorkflowPage() {
     })
     if (active.length > 0) { setMarkCleanedOrder(order); return }
     doMarkCleaned(order)
+  }
+
+  // Load-level move: if going to 'ready', call moveLoad directly; otherwise open MoveLoadModal
+  const moveLoadM = trpc.equipment.moveLoad.useMutation({
+    onSuccess: () => { utils.orders.list.invalidate(); toast.success('Load marked ready') },
+    onError: (e) => toast.error(e.message),
+  })
+  const handleMoveLoad = (load: OrderLoad) => {
+    if (load.stage === 'folding') {
+      // Mark ready directly — no machine to pick
+      moveLoadM.mutate({ load_id: load.id })
+    } else {
+      setMoveLoadTarget(load)
+    }
   }
 
   const doMarkCleaned = (order: OrderRow) => {
@@ -926,6 +1247,7 @@ export default function WorkflowPage() {
               onAddAssignment={(order, t) => setAssignTarget({ order, type: t })}
               onMarkCleaned={handleMarkCleaned}
               onMoveNext={handleMoveNext}
+              onMoveLoad={handleMoveLoad}
               onViewDetail={setViewingOrderId}
             />
           ))}
@@ -934,15 +1256,27 @@ export default function WorkflowPage() {
       </div>
       )}
 
-      {/* Assign modal */}
+      {/* Assign modal (legacy assignments or first-time load creation) */}
       {assignTarget && (
         <MachinesAssignModal
           order={assignTarget.order}
           filterType={assignTarget.type}
           clearFromType={assignTarget.clearFromType}
           busyEquipment={busyForModal}
+          mode={assignTarget.mode}
           onClose={() => setAssignTarget(null)}
           onSaved={() => setAssignTarget(null)}
+        />
+      )}
+
+      {/* Move load modal (advance one load to next stage) */}
+      {moveLoadTarget && (
+        <MoveLoadModal
+          load={moveLoadTarget}
+          allEquipment={allEquipment as EquipItem[]}
+          busyEquipment={busyEquipment}
+          onClose={() => setMoveLoadTarget(null)}
+          onSaved={() => setMoveLoadTarget(null)}
         />
       )}
 

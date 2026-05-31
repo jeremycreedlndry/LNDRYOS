@@ -103,9 +103,16 @@ function MachineRow({ assignment }: { assignment: MachineAssignment }) {
 
 // ─── Order board card ─────────────────────────────────────────────────────────
 
+// Natural next stage for each column
+const NEXT_STAGE: Partial<Record<string, { type: EquipmentType; label: string } | 'ready'>> = {
+  washer:  { type: 'dryer',   label: '→ Dryers' },
+  dryer:   { type: 'folding', label: '→ Folding' },
+  folding: 'ready',
+}
+
 function BoardOrderCard({
   order, columnType, isDragging, onDragStart, onDragEnd,
-  onAddAssignment, onMarkCleaned, onViewDetail,
+  onAddAssignment, onMarkCleaned, onMoveNext, onViewDetail,
 }: {
   order: OrderRow
   columnType: 'todo' | EquipmentType | 'completed'
@@ -114,6 +121,7 @@ function BoardOrderCard({
   onDragEnd?: () => void
   onAddAssignment?: (order: OrderRow, type: EquipmentType) => void
   onMarkCleaned?: (order: OrderRow) => void
+  onMoveNext?: (order: OrderRow, next: EquipmentType | 'ready', clearFrom: EquipmentType) => void
   onViewDetail: (id: string) => void
 }) {
   const columnAssignments = (columnType === 'todo' || columnType === 'completed')
@@ -159,22 +167,41 @@ function BoardOrderCard({
         </div>
       )}
 
-      {onAddAssignment && columnType !== 'todo' && columnType !== 'completed' && (
-        <button
-          onClick={() => onAddAssignment(order, columnType as EquipmentType)}
-          className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-gray-200 py-1 text-[10px] text-gray-400 hover:border-brand-300 hover:text-brand-500 transition-colors"
-        >
-          <Plus className="h-3 w-3" /> Add machine
-        </button>
-      )}
-
-      {onMarkCleaned && columnType !== 'todo' && columnType !== 'completed' && (
-        <button
-          onClick={() => onMarkCleaned(order)}
-          className="mt-1 flex w-full items-center justify-center gap-1 rounded-lg bg-green-50 border border-green-200 py-1 text-[10px] font-semibold text-green-700 hover:bg-green-100 transition-colors"
-        >
-          <Check className="h-3 w-3" /> Mark Cleaned
-        </button>
+      {columnType !== 'todo' && columnType !== 'completed' && (
+        <div className="mt-2 space-y-1">
+          {/* Add machine (secondary) */}
+          {onAddAssignment && (
+            <button
+              onClick={() => onAddAssignment(order, columnType as EquipmentType)}
+              className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-gray-200 py-1 text-[10px] text-gray-400 hover:border-brand-300 hover:text-brand-500 transition-colors"
+            >
+              <Plus className="h-3 w-3" /> Add machine
+            </button>
+          )}
+          {/* Move to next stage */}
+          {(() => {
+            const next = NEXT_STAGE[columnType]
+            if (!next) return null
+            if (next === 'ready') {
+              return onMarkCleaned ? (
+                <button
+                  onClick={() => onMarkCleaned(order)}
+                  className="flex w-full items-center justify-center gap-1 rounded-lg bg-green-50 border border-green-200 py-1 text-[10px] font-semibold text-green-700 hover:bg-green-100 transition-colors"
+                >
+                  <Check className="h-3 w-3" /> Mark Ready
+                </button>
+              ) : null
+            }
+            return onMoveNext ? (
+              <button
+                onClick={() => onMoveNext(order, next.type, columnType as EquipmentType)}
+                className="flex w-full items-center justify-center gap-1 rounded-lg bg-brand-50 border border-brand-200 py-1 text-[10px] font-semibold text-brand-700 hover:bg-brand-100 transition-colors"
+              >
+                {next.label}
+              </button>
+            ) : null
+          })()}
+        </div>
       )}
     </div>
   )
@@ -192,7 +219,7 @@ function EquipmentColumn({
   type, orders, isDragTarget, draggingOrderId,
   onDragOver, onDragLeave, onDrop,
   onDragStart, onDragEnd,
-  onAddAssignment, onMarkCleaned, onViewDetail,
+  onAddAssignment, onMarkCleaned, onMoveNext, onViewDetail,
 }: {
   type: EquipmentType
   orders: OrderRow[]
@@ -205,6 +232,7 @@ function EquipmentColumn({
   onDragEnd: () => void
   onAddAssignment: (order: OrderRow, type: EquipmentType) => void
   onMarkCleaned: (order: OrderRow) => void
+  onMoveNext: (order: OrderRow, next: EquipmentType | 'ready', clearFrom: EquipmentType) => void
   onViewDetail: (id: string) => void
 }) {
   const { label, bg, ring, Icon } = COLUMN_CONFIG[type]
@@ -240,6 +268,7 @@ function EquipmentColumn({
             onDragEnd={onDragEnd}
             onAddAssignment={onAddAssignment}
             onMarkCleaned={onMarkCleaned}
+            onMoveNext={onMoveNext}
             onViewDetail={onViewDetail}
           />
         ))}
@@ -260,10 +289,11 @@ const TEMPS = ['Cold', 'Warm', 'Hot']
 type AssignmentDetail = { duration_minutes: number | null; temperature: string | null; assigned_at?: string | null }
 
 function MachinesAssignModal({
-  order, filterType, busyEquipment, onClose, onSaved,
+  order, filterType, clearFromType, busyEquipment, onClose, onSaved,
 }: {
   order: OrderRow
   filterType: EquipmentType
+  clearFromType?: EquipmentType   // when moving from another column, drop those assignments
   busyEquipment: Map<string, string>
   onClose: () => void
   onSaved: () => void
@@ -271,10 +301,12 @@ function MachinesAssignModal({
   const utils = trpc.useUtils()
   const { data: allEquipment = [] } = trpc.equipment.list.useQuery(undefined)
 
-  // Start with ALL current assignments so other types are preserved on save
+  // Start with existing assignments, but drop any belonging to the source column
+  // (so dragging Washers → Dryers doesn't keep the washer assignment)
   const [details, setDetails] = useState<Map<string, AssignmentDetail>>(() => {
     const m = new Map<string, AssignmentDetail>()
     for (const a of order.assignments) {
+      if (clearFromType && a.equipment.type === clearFromType) continue
       m.set(a.equipment.id, { duration_minutes: a.duration_minutes, temperature: a.temperature, assigned_at: a.assigned_at })
     }
     return m
@@ -718,8 +750,9 @@ export default function WorkflowPage() {
 
   const [viewMode, setViewMode] = useState<'board' | 'machines'>('board')
   const [draggingOrderId, setDraggingOrderId] = useState<string | null>(null)
+  const [draggingFromType, setDraggingFromType] = useState<EquipmentType | 'todo' | null>(null)
   const [dragTarget, setDragTarget] = useState<EquipmentType | null>(null)
-  const [assignTarget, setAssignTarget] = useState<{ order: OrderRow; type: EquipmentType } | null>(null)
+  const [assignTarget, setAssignTarget] = useState<{ order: OrderRow; type: EquipmentType; clearFromType?: EquipmentType } | null>(null)
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null)
   const [markCleanedOrder, setMarkCleanedOrder] = useState<OrderRow | null>(null)
 
@@ -769,9 +802,22 @@ export default function WorkflowPage() {
   const handleDrop = (type: EquipmentType) => {
     const order = cleaning.find((o) => o.id === draggingOrderId)
     if (!order) return
-    setAssignTarget({ order, type })
+    // If dragging from a different equipment column, clear that column's assignments
+    const clearFromType = (draggingFromType && draggingFromType !== 'todo' && draggingFromType !== type)
+      ? draggingFromType as EquipmentType
+      : undefined
+    setAssignTarget({ order, type, clearFromType })
     setDraggingOrderId(null)
+    setDraggingFromType(null)
     setDragTarget(null)
+  }
+
+  const handleMoveNext = (order: OrderRow, next: EquipmentType | 'ready', clearFrom: EquipmentType) => {
+    if (next === 'ready') {
+      handleMarkCleaned(order)
+    } else {
+      setAssignTarget({ order, type: next, clearFromType: clearFrom })
+    }
   }
 
   const handleMarkCleaned = (order: OrderRow) => {
@@ -856,8 +902,8 @@ export default function WorkflowPage() {
                   order={order}
                   columnType="todo"
                   isDragging={draggingOrderId === order.id}
-                  onDragStart={() => setDraggingOrderId(order.id)}
-                  onDragEnd={() => { setDraggingOrderId(null); setDragTarget(null) }}
+                  onDragStart={() => { setDraggingOrderId(order.id); setDraggingFromType('todo') }}
+                  onDragEnd={() => { setDraggingOrderId(null); setDraggingFromType(null); setDragTarget(null) }}
                   onViewDetail={setViewingOrderId}
                 />
               ))}
@@ -875,10 +921,11 @@ export default function WorkflowPage() {
               onDragOver={() => setDragTarget(type)}
               onDragLeave={() => setDragTarget(null)}
               onDrop={() => handleDrop(type)}
-              onDragStart={(id) => setDraggingOrderId(id)}
-              onDragEnd={() => { setDraggingOrderId(null); setDragTarget(null) }}
+              onDragStart={(id) => { setDraggingOrderId(id); setDraggingFromType(type) }}
+              onDragEnd={() => { setDraggingOrderId(null); setDraggingFromType(null); setDragTarget(null) }}
               onAddAssignment={(order, t) => setAssignTarget({ order, type: t })}
               onMarkCleaned={handleMarkCleaned}
+              onMoveNext={handleMoveNext}
               onViewDetail={setViewingOrderId}
             />
           ))}
@@ -892,6 +939,7 @@ export default function WorkflowPage() {
         <MachinesAssignModal
           order={assignTarget.order}
           filterType={assignTarget.type}
+          clearFromType={assignTarget.clearFromType}
           busyEquipment={busyForModal}
           onClose={() => setAssignTarget(null)}
           onSaved={() => setAssignTarget(null)}

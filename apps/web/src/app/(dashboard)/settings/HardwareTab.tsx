@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { qzListPrinters, qzPrintZPL, qzPrintRaw } from '@/lib/qzTray'
+import { LABEL_SIZE_PRESETS, DEFAULT_LABEL_SIZE, type LabelSize } from '@/lib/printJobs'
 import toast from 'react-hot-toast'
 
 // ─── Printer picker modal ─────────────────────────────────────────────────────
@@ -243,6 +244,12 @@ function PrinterSection({ type, label, description, defaultConnection }: {
   const tenantSettings = (tenant?.settings ?? {}) as Record<string, unknown>
   const hardware = (tenantSettings.hardware ?? {}) as Record<string, unknown>
   const saved = (hardware[`${type}_printer`] ?? {}) as Partial<PrinterConfig>
+  const savedSize = (hardware['label_size'] as LabelSize | undefined) ?? DEFAULT_LABEL_SIZE
+  const [labelSize, setLabelSize] = useState<string>(
+    Object.entries(LABEL_SIZE_PRESETS).find(
+      ([, v]) => v.width_in === savedSize.width_in && v.height_in === savedSize.height_in
+    )?.[0] ?? '4x2'
+  )
 
   const [name,       setName]       = useState(saved.name       ?? '')
   const [connection, setConnection] = useState<ConnectionType>(saved.connection ?? defaultConnection ?? 'network')
@@ -263,13 +270,15 @@ function PrinterSection({ type, label, description, defaultConnection }: {
   })
 
   const handleSave = () => {
+    const sizeVal = LABEL_SIZE_PRESETS[labelSize] ?? DEFAULT_LABEL_SIZE
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hardwareUpdate: any = {
+      ...hardware,
+      [`${type}_printer`]: { name: name.trim(), connection, ip: ip.trim(), port: port.trim(), host: host.trim(), share: share.trim(), address: address.trim() },
+      ...(type === 'label' ? { label_size: { width_in: sizeVal.width_in, height_in: sizeVal.height_in } } : {}),
+    }
     update.mutate({
-      settings: {
-        hardware: {
-          ...hardware,
-          [`${type}_printer`]: { name: name.trim(), connection, ip: ip.trim(), port: port.trim(), host: host.trim(), share: share.trim(), address: address.trim() },
-        },
-      },
+      settings: { hardware: hardwareUpdate },
     })
   }
 
@@ -367,6 +376,28 @@ function PrinterSection({ type, label, description, defaultConnection }: {
             As it appears in Windows Control Panel → Devices and Printers. Use &quot;Find Printer&quot; to auto-discover via QZ Tray.
           </p>
         </div>
+
+        {/* Label size — label printer only */}
+        {type === 'label' && (
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">Label size</label>
+            <div className="grid grid-cols-3 gap-2">
+              {Object.entries(LABEL_SIZE_PRESETS).map(([key, val]) => (
+                <button
+                  key={key}
+                  onClick={() => { setLabelSize(key); mark() }}
+                  className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors text-center ${
+                    labelSize === key
+                      ? 'border-brand-500 bg-brand-50 text-brand-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  {val.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Connection type */}
         <div>

@@ -7,6 +7,54 @@ import { cn } from '@/lib/utils'
 import type { EquipmentType } from '@laundry/db'
 import toast from 'react-hot-toast'
 import { OrderDetailModal } from '@/app/(dashboard)/orders/OrderDetailModal'
+import { printBagOutLabels, type LabelSize } from '@/lib/printJobs'
+
+// ─── Bag count modal (workflow) ───────────────────────────────────────────────
+
+function BagCountWorkflowModal({ onConfirm, onCancel }: {
+  onConfirm: (count: number) => void
+  onCancel: () => void
+}) {
+  const [count, setCount] = useState(1)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-xs rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 className="text-base font-semibold text-gray-900">How many bags?</h2>
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-center gap-4">
+            <button onClick={() => setCount((c) => Math.max(1, c - 1))}
+              className="h-10 w-10 rounded-full border border-gray-200 text-xl font-bold text-gray-600 hover:bg-gray-50">−</button>
+            <span className="text-4xl font-bold text-gray-900 w-12 text-center">{count}</span>
+            <button onClick={() => setCount((c) => c + 1)}
+              className="h-10 w-10 rounded-full border border-gray-200 text-xl font-bold text-gray-600 hover:bg-gray-50">+</button>
+          </div>
+          <div className="flex gap-2 justify-center">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button key={n} onClick={() => setCount(n)}
+                className={cn('h-9 w-9 rounded-lg border text-sm font-medium transition-colors',
+                  count === n ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50')}>
+                {n}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button onClick={onCancel}
+              className="flex-1 rounded-xl border border-gray-200 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button onClick={() => onConfirm(count)}
+              className="flex-1 rounded-xl bg-green-600 py-2 text-sm font-semibold text-white hover:bg-green-700">
+              Print &amp; Mark Cleaned
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1047,6 +1095,8 @@ export default function WorkflowPage() {
   const [moveLoadTarget, setMoveLoadTarget] = useState<OrderLoad | null>(null)
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null)
   const [markCleanedOrder, setMarkCleanedOrder] = useState<OrderRow | null>(null)
+  const [bagCountOrder, setBagCountOrder] = useState<OrderRow | null>(null)
+  const { data: tenant } = trpc.tenants.getCurrent.useQuery(undefined, { staleTime: 60_000 })
 
   const allOrders = orders as unknown as OrderRow[]
 
@@ -1133,7 +1183,7 @@ export default function WorkflowPage() {
       return (Date.now() - new Date(a.assigned_at).getTime()) / 60000 < a.duration_minutes
     })
     if (active.length > 0) { setMarkCleanedOrder(order); return }
-    doMarkCleaned(order)
+    setBagCountOrder(order)
   }
 
   // Load-level move: if going to 'ready', call moveLoad directly; otherwise open MoveLoadModal
@@ -1150,8 +1200,22 @@ export default function WorkflowPage() {
     }
   }
 
-  const doMarkCleaned = (order: OrderRow) => {
+  const doMarkCleaned = (order: OrderRow, bagCount?: number) => {
     setMarkCleanedOrder(null)
+    setBagCountOrder(null)
+
+    // Print bag-out labels if configured
+    const hw = (tenant?.settings as Record<string, unknown> | null)?.hardware as Record<string, unknown> | undefined
+    const labelPrinter = (hw?.label_printer as Record<string, string> | undefined)?.name
+    if (labelPrinter && bagCount && bagCount > 0) {
+      const labelSize = hw?.label_size as LabelSize | undefined
+      printBagOutLabels(labelPrinter, {
+        order_number: order.order_number,
+        customer_name: order.customer ? `${(order.customer as { first_name: string; last_name: string }).first_name} ${(order.customer as { first_name: string; last_name: string }).last_name}` : null,
+      }, bagCount, tenant?.name as string | undefined, labelSize)
+        .catch((e) => console.warn('[bag-out print]', e))
+    }
+
     setAssignmentsM.mutate({ order_id: order.id, assignments: [] }, {
       onSettled: () => updateStatus.mutate({ id: order.id, status: 'ready' }),
     })
@@ -1280,6 +1344,14 @@ export default function WorkflowPage() {
         />
       )}
 
+      {/* Bag count modal */}
+      {bagCountOrder && (
+        <BagCountWorkflowModal
+          onConfirm={(count) => doMarkCleaned(bagCountOrder, count)}
+          onCancel={() => setBagCountOrder(null)}
+        />
+      )}
+
       {/* Mark Cleaned confirmation (active timers still running) */}
       {markCleanedOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -1293,7 +1365,7 @@ export default function WorkflowPage() {
                 className="flex-1 rounded-xl border border-gray-200 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">
                 Cancel
               </button>
-              <button onClick={() => doMarkCleaned(markCleanedOrder)}
+              <button onClick={() => { setMarkCleanedOrder(null); setBagCountOrder(markCleanedOrder) }}
                 className="flex-1 rounded-xl bg-green-600 py-2 text-sm font-semibold text-white hover:bg-green-700">
                 Mark Cleaned
               </button>

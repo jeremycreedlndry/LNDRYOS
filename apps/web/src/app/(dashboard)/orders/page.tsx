@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { OrderStatus, EquipmentType } from '@laundry/db'
 import toast from 'react-hot-toast'
+import { printBagOutLabels, type LabelSize } from '@/lib/printJobs'
 import { OrderDetailModal } from './OrderDetailModal'
 import { OrderIssuesModal } from '@/components/orders/OrderIssuesModal'
 import { PaymentModal } from '@/components/pos/PaymentModal'
@@ -531,6 +532,51 @@ function AssignModal({ orderId, orderNumber, currentAssignments, busyEquipment, 
   )
 }
 
+// ─── Bag count modal ──────────────────────────────────────────────────────────
+
+function BagCountModal({ onConfirm, onCancel }: {
+  onConfirm: (count: number) => void
+  onCancel: () => void
+}) {
+  const [count, setCount] = useState(1)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-xs rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 className="text-base font-semibold text-gray-900">How many bags?</h2>
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-center gap-4">
+            <button
+              onClick={() => setCount((c) => Math.max(1, c - 1))}
+              className="h-10 w-10 rounded-full border border-gray-200 text-xl font-bold text-gray-600 hover:bg-gray-50"
+            >−</button>
+            <span className="text-4xl font-bold text-gray-900 w-12 text-center">{count}</span>
+            <button
+              onClick={() => setCount((c) => c + 1)}
+              className="h-10 w-10 rounded-full border border-gray-200 text-xl font-bold text-gray-600 hover:bg-gray-50"
+            >+</button>
+          </div>
+          <div className="flex gap-2 justify-center">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button key={n} onClick={() => setCount(n)}
+                className={cn('h-9 w-9 rounded-lg border text-sm font-medium transition-colors',
+                  count === n ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50')}>
+                {n}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" onClick={onCancel} className="flex-1">Cancel</Button>
+            <Button onClick={() => onConfirm(count)} className="flex-1">Print & Mark Cleaned</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Order card ────────────────────────────────────────────────────────────────
 
 function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenPayment, onPrintReceipt }: { order: OrderRow; index: number; onAssign: (id: string) => void; onViewDetail: (id: string) => void; onOpenIssues: (order: OrderRow) => void; onOpenPayment: (order: OrderRow) => void; onPrintReceipt: (order: OrderRow) => void }) {
@@ -539,7 +585,10 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
   const [readyConfirmEquipment, setReadyConfirmEquipment] = useState<string[] | null>(null)
   const [popoverPos, setPopoverPos] = useState<{ top: number; right: number } | null>(null)
   const [showCustomerProfile, setShowCustomerProfile] = useState<'orders' | 'edit' | null>(null)
+  const [showBagCount, setShowBagCount] = useState(false)
   const markCleanedRef = useRef<HTMLButtonElement>(null)
+
+  const { data: tenant } = trpc.tenants.getCurrent.useQuery(undefined, { staleTime: 60_000 })
 
   const setAssignments = trpc.equipment.setAssignments.useMutation()
 
@@ -567,13 +616,27 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
       return
     }
 
-    doMarkCleaned()
+    setShowBagCount(true)
   }
 
-  const doMarkCleaned = () => {
+  const doMarkCleaned = (bagCount?: number) => {
     setReadyConfirmEquipment(null)
     setPopoverPos(null)
+    setShowBagCount(false)
     setPendingStatus('ready')
+
+    // Print bag-out labels if label printer configured
+    const hw = (tenant?.settings as Record<string, unknown> | null)?.hardware as Record<string, unknown> | undefined
+    const labelPrinter = (hw?.label_printer as Record<string, string> | undefined)?.name
+    if (labelPrinter && bagCount && bagCount > 0) {
+      const labelSize = hw?.label_size as LabelSize | undefined
+      printBagOutLabels(labelPrinter, {
+        order_number: order.order_number,
+        customer_name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : null,
+      }, bagCount, tenant?.name as string | undefined, labelSize)
+        .catch((e) => console.warn('[bag-out print]', e))
+    }
+
     setAssignments.mutate({ order_id: order.id, assignments: [] }, {
       onSettled: () => updateStatus.mutate({ id: order.id, status: 'ready' }),
     })
@@ -793,6 +856,14 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
         />
       )}
 
+      {/* Bag count modal */}
+      {showBagCount && (
+        <BagCountModal
+          onConfirm={(count) => doMarkCleaned(count)}
+          onCancel={() => setShowBagCount(false)}
+        />
+      )}
+
       {/* Mark Cleaned confirm popover — fixed so it escapes overflow:hidden */}
       {readyConfirmEquipment && popoverPos && (
         <>
@@ -813,7 +884,7 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
                 Cancel
               </button>
               <button
-                onClick={doMarkCleaned}
+                onClick={() => { setReadyConfirmEquipment(null); setPopoverPos(null); setShowBagCount(true) }}
                 disabled={!!pendingStatus}
                 className="flex-1 rounded-md bg-green-600 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-40">
                 Mark Cleaned

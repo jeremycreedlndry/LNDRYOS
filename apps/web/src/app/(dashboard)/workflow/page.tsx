@@ -331,49 +331,30 @@ function MoveLoadModal({
             const busy = !selectedId || selectedId !== item.id ? busyEquipment.get(item.id) : undefined
             const active = selectedId === item.id
 
-            // Dryer occupied by a sibling load — show as combinable
+            // Dryer occupied by a sibling load — show as combinable (no time/temp, dryer already running)
             if (busy && combinable) {
+              const existingTime = combinable.duration_minutes
+              const existingTemp = combinable.temperature
               return (
                 <div key={item.id} className={cn('rounded-xl border-2 transition-colors',
                   active ? 'border-amber-400 bg-amber-50' : 'border-amber-200 bg-amber-50/50')}>
                   <button onClick={() => setSelectedId(active ? null : item.id)}
                     className="flex w-full items-center justify-between px-3 py-2.5">
-                    <span className={cn('text-sm font-semibold', active ? 'text-amber-700' : 'text-amber-600')}>
-                      {item.name}
-                    </span>
-                    <span className={cn('text-xs rounded-full px-2 py-0.5 font-medium',
+                    <div className="text-left">
+                      <span className={cn('text-sm font-semibold block', active ? 'text-amber-700' : 'text-amber-600')}>
+                        {item.name}
+                      </span>
+                      {(existingTime || existingTemp) && (
+                        <span className="text-xs text-amber-500">
+                          Already running{existingTime ? ` · ${existingTime} min` : ''}{existingTemp ? ` · ${existingTemp}` : ''}
+                        </span>
+                      )}
+                    </div>
+                    <span className={cn('text-xs rounded-full px-2 py-0.5 font-medium shrink-0',
                       active ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-700')}>
                       {active ? 'Selected' : `Combine with Load ${combinable.load_number}`}
                     </span>
                   </button>
-                  {active && times.length > 0 && (
-                    <div className="border-t border-amber-200 px-3 pb-3 pt-2 space-y-2">
-                      <div>
-                        <p className="text-xs font-medium text-gray-500 mb-1.5">Time (min)</p>
-                        <div className="flex gap-1.5 flex-wrap">
-                          {times.map((t) => (
-                            <button key={t} onClick={() => setDuration(duration === t ? null : t)}
-                              className={cn('rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
-                                duration === t ? 'border-brand-500 bg-brand-600 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}>
-                              {t}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-xs font-medium text-gray-500 mb-1.5">Temperature</p>
-                        <div className="flex gap-1.5">
-                          {TEMPS.map((t) => (
-                            <button key={t} onClick={() => setTemp(temp === t ? null : t)}
-                              className={cn('flex-1 rounded-lg border py-1.5 text-xs font-semibold transition-colors',
-                                temp === t ? 'border-brand-500 bg-brand-600 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}>
-                              {t}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )
             }
@@ -448,7 +429,14 @@ function MoveLoadModal({
           <button
             onClick={() => {
               if (!selectedId) return
-              moveLoad.mutate({ load_id: load.id, equipment_id: selectedId, duration_minutes: duration, temperature: temp })
+              const combining = combinableByEquipment.get(selectedId)
+              moveLoad.mutate({
+                load_id: load.id,
+                equipment_id: selectedId,
+                // When combining, inherit the running dryer's settings; otherwise use selected values
+                duration_minutes: combining ? combining.duration_minutes : duration,
+                temperature:      combining ? combining.temperature      : temp,
+              })
             }}
             disabled={!selectedId || moveLoad.isPending}
             className="flex-1 rounded-xl bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40">

@@ -45,6 +45,9 @@ export function BagEntryModal({ item, customerId, onSubmit, onCancel }: Props) {
   const [selectedPrefs, setSelectedPrefs] = useState<Record<string, string>>({})
 
   const [mode, setMode] = useState<'per_bag' | 'split'>('per_bag')
+  const [isExpress, setIsExpress] = useState(false)
+  const expressPrice = (item as ServiceItem & { express_price?: number | null }).express_price ?? null
+  const effectivePrice = isExpress && expressPrice ? expressPrice : item.unit_price
 
   // Per-bag mode state
   const [bagNumber, setBagNumber] = useState(1)
@@ -100,15 +103,16 @@ export function BagEntryModal({ item, customerId, onSubmit, onCancel }: Props) {
       .filter((g) => selectedPrefs[g])
       .map((g) => selectedPrefs[g])
       .join(' · ')
-    const bagNotes = [prefNote, wetWeight ? 'Wet weight' : '', notes.trim()].filter(Boolean).join(' · ') || undefined
+    const bagNotes = [prefNote, isExpress ? 'Express' : '', wetWeight ? 'Wet weight' : '', notes.trim()].filter(Boolean).join(' · ') || undefined
+    const baseName = isExpress ? `${item.name} (Express)` : item.name
 
     const lines: CartLine[] = [{
       key: `${item.id}-bag${bagNum}-${Date.now()}`,
       service_item_id: item.id,
-      name: `${item.name} ${bagLabel}`,
+      name: `${baseName} ${bagLabel}`,
       category: 'wash_fold',
       quantity: w,
-      unit_price: item.unit_price,
+      unit_price: effectivePrice,
       unit_label: 'lb',
       notes: bagNotes,
     }]
@@ -228,7 +232,7 @@ export function BagEntryModal({ item, customerId, onSubmit, onCancel }: Props) {
 
         {step === 'weight' && (<>
 
-        {/* Mode toggle */}
+        {/* Express toggle + Mode toggle */}
         <div className="flex border-b border-gray-100">
           {(['per_bag', 'split'] as const).map((m) => (
             <button key={m} onClick={() => setMode(m)}
@@ -239,6 +243,20 @@ export function BagEntryModal({ item, customerId, onSubmit, onCancel }: Props) {
               {m === 'per_bag' ? 'Per Bag' : 'Split Total'}
             </button>
           ))}
+          {expressPrice && (
+            <button
+              onClick={() => setIsExpress((v) => !v)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2.5 text-xs font-semibold border-l border-gray-100 transition-colors',
+                isExpress
+                  ? 'border-b-2 border-amber-500 bg-amber-50 text-amber-700'
+                  : 'text-gray-400 hover:text-gray-600',
+              )}
+            >
+              <span className={cn('h-2 w-2 rounded-full', isExpress ? 'bg-amber-500' : 'bg-gray-300')} />
+              Express
+            </button>
+          )}
         </div>
 
         <div className="p-6 space-y-5">
@@ -252,7 +270,9 @@ export function BagEntryModal({ item, customerId, onSubmit, onCancel }: Props) {
                   placeholder="0.0" autoFocus
                   onKeyDown={(e) => e.key === 'Enter' && handleNextBag()}
                   className="text-4xl h-16 text-center font-bold tracking-tight" />
-                <p className="text-xs text-gray-400 mt-1.5">lbs · {formatCurrency(item.unit_price)}/lb</p>
+                <p className={cn('text-xs mt-1.5', isExpress ? 'text-amber-600 font-medium' : 'text-gray-400')}>
+                  lbs · {formatCurrency(effectivePrice)}/lb{isExpress ? ' (Express)' : ''}
+                </p>
               </div>
 
               {/* Upcharges */}
@@ -312,9 +332,11 @@ export function BagEntryModal({ item, customerId, onSubmit, onCancel }: Props) {
 
               {/* Preview */}
               {splitPerBag !== null && (
-                <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-center">
-                  <p className="text-2xl font-bold text-brand-700">{splitPerBag.toFixed(1)} lbs</p>
-                  <p className="text-xs text-brand-500 mt-0.5">per bag × {splitBagCount} bags = {splitTotalW.toFixed(1)} lbs · {formatCurrency(Math.round(splitTotalW * item.unit_price))}</p>
+                <div className={cn('rounded-xl border px-4 py-3 text-center', isExpress ? 'border-amber-200 bg-amber-50' : 'border-brand-200 bg-brand-50')}>
+                  <p className={cn('text-2xl font-bold', isExpress ? 'text-amber-700' : 'text-brand-700')}>{splitPerBag.toFixed(1)} lbs</p>
+                  <p className={cn('text-xs mt-0.5', isExpress ? 'text-amber-600' : 'text-brand-500')}>
+                    per bag × {splitBagCount} bags = {splitTotalW.toFixed(1)} lbs · {formatCurrency(Math.round(splitTotalW * effectivePrice))}{isExpress ? ' (Express)' : ''}
+                  </p>
                 </div>
               )}
 

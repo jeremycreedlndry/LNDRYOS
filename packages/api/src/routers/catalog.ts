@@ -55,6 +55,7 @@ export const catalogRouter = router({
       unit_label: z.string().default('item'),
       sort_order: z.number().int().default(0),
       preference_groups: z.array(z.string()).default([]),
+      express_price: z.number().int().nonnegative().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
@@ -78,6 +79,7 @@ export const catalogRouter = router({
       is_active: z.boolean().optional(),
       sort_order: z.number().int().optional(),
       preference_groups: z.array(z.string()).optional(),
+      express_price: z.number().int().nonnegative().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...rest } = input

@@ -56,6 +56,7 @@ interface ServiceFormData {
   unit_price_dollars: string
   unit_label: string
   preference_groups: string[]
+  express_price_dollars: string  // empty string = no express pricing
 }
 
 interface ServiceModalProps {
@@ -68,9 +69,11 @@ interface ServiceModalProps {
 
 function ServiceModal({ initial, category, onClose, onSave, isSaving }: ServiceModalProps) {
   const [form, setForm] = useState<ServiceFormData>(
-    initial ?? { name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] }
+    initial ?? { name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [], express_price_dollars: '' }
   )
   const set = (k: keyof ServiceFormData, v: string) => setForm((f) => ({ ...f, [k]: v }))
+  const showExpress = category === 'wash_fold'
+  const hasExpressPrice = form.express_price_dollars.trim() !== ''
 
   const togglePrefGroup = (key: string) => {
     setForm((f) => ({
@@ -115,6 +118,24 @@ function ServiceModal({ initial, category, onClose, onSave, isSaving }: ServiceM
               </datalist>
             </div>
           </div>
+
+          {showExpress && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-sm font-medium text-gray-700">Express Price ($)</label>
+                <span className="text-xs text-gray-400">Same-day turnaround — leave blank to disable</span>
+              </div>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                value={form.express_price_dollars}
+                onChange={(e) => set('express_price_dollars', e.target.value)}
+                placeholder={`e.g. ${form.unit_price_dollars ? (parseFloat(form.unit_price_dollars) * 1.5).toFixed(2) : '3.00'}`}
+              />
+            </div>
+          )}
 
           {showPrefGroups && (
             <div>
@@ -245,7 +266,7 @@ function SortableServiceRow({
   onDeleteConfirm,
   onDeleteCancel,
 }: {
-  item: { id: string; name: string; unit_price: number; unit_label: string; is_active: boolean; category: string }
+  item: { id: string; name: string; unit_price: number; unit_label: string; is_active: boolean; category: string; express_price?: number | null }
   deleteConfirm: string | null
   onToggle: () => void
   onEdit: () => void
@@ -264,7 +285,10 @@ function SortableServiceRow({
       </button>
       <div className="flex-1 min-w-0">
         <p className={`text-sm font-medium ${item.is_active ? 'text-gray-900' : 'text-gray-400 line-through'}`}>{item.name}</p>
-        <p className="text-xs text-gray-500">{formatCurrency(item.unit_price)}{item.unit_label !== 'item' ? ` / ${item.unit_label}` : ''}</p>
+        <p className="text-xs text-gray-500">
+          {formatCurrency(item.unit_price)}{item.unit_label !== 'item' ? ` / ${item.unit_label}` : ''}
+          {item.express_price ? <span className="ml-2 text-amber-600">· Express {formatCurrency(item.express_price)}/{item.unit_label !== 'item' ? item.unit_label : 'item'}</span> : null}
+        </p>
       </div>
       <button onClick={onToggle} className={`transition-colors ${item.is_active ? 'text-brand-600 hover:text-brand-700' : 'text-gray-300 hover:text-gray-400'}`}>
         {item.is_active ? <ToggleRight className="h-6 w-6" /> : <ToggleLeft className="h-6 w-6" />}
@@ -340,10 +364,13 @@ function ServiceSection({ category, label, description, isDefaultList, priceOver
 
   const handleSave = (data: ServiceFormData) => {
     const unit_price = Math.round(parseFloat(data.unit_price_dollars) * 100)
+    const express_price = data.express_price_dollars.trim()
+      ? Math.round(parseFloat(data.express_price_dollars) * 100)
+      : null
     if (data.id) {
-      updateItem.mutate({ id: data.id, name: data.name, unit_price, unit_label: data.unit_label, preference_groups: data.preference_groups })
+      updateItem.mutate({ id: data.id, name: data.name, unit_price, unit_label: data.unit_label, preference_groups: data.preference_groups, express_price })
     } else {
-      createItem.mutate({ name: data.name, category, unit_price, unit_label: data.unit_label, sort_order: items.length, preference_groups: data.preference_groups })
+      createItem.mutate({ name: data.name, category, unit_price, unit_label: data.unit_label, sort_order: items.length, preference_groups: data.preference_groups, express_price })
     }
   }
 
@@ -355,7 +382,7 @@ function ServiceSection({ category, label, description, isDefaultList, priceOver
           <p className="text-xs text-gray-400">{description}</p>
         </div>
         {isDefaultList && (
-          <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] })}
+          <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [], express_price_dollars: '' })}
             className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700">
             <Plus className="h-3.5 w-3.5" /> Add
           </button>
@@ -366,7 +393,7 @@ function ServiceSection({ category, label, description, isDefaultList, priceOver
         isDefaultList ? (
           <div className="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-400">
             No {label.toLowerCase()} yet.{' '}
-            <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [] })} className="text-brand-600 hover:underline">Add one</button>
+            <button onClick={() => setModal({ name: '', category, unit_price_dollars: '', unit_label: 'item', preference_groups: [], express_price_dollars: '' })} className="text-brand-600 hover:underline">Add one</button>
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-400">No {label.toLowerCase()} items.</div>
@@ -381,7 +408,7 @@ function ServiceSection({ category, label, description, isDefaultList, priceOver
                   item={item}
                   deleteConfirm={deleteConfirm}
                   onToggle={() => updateItem.mutate({ id: item.id, is_active: !item.is_active })}
-                  onEdit={() => setModal({ id: item.id, name: item.name, category: item.category as ItemCategory, unit_price_dollars: (item.unit_price / 100).toFixed(2), unit_label: item.unit_label, preference_groups: (item.preference_groups as string[] | null) ?? [] })}
+                  onEdit={() => setModal({ id: item.id, name: item.name, category: item.category as ItemCategory, unit_price_dollars: (item.unit_price / 100).toFixed(2), unit_label: item.unit_label, preference_groups: (item.preference_groups as string[] | null) ?? [], express_price_dollars: item.express_price ? (item.express_price / 100).toFixed(2) : '' })}
                   onDeleteRequest={() => setDeleteConfirm(item.id)}
                   onDeleteConfirm={() => deleteItem.mutate({ id: item.id })}
                   onDeleteCancel={() => setDeleteConfirm(null)}

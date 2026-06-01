@@ -238,6 +238,7 @@ export interface ServiceItem {
   is_active: boolean
   sort_order: number
   preference_groups: string[] | null
+  express_price: number | null
   created_at: string
 }
 

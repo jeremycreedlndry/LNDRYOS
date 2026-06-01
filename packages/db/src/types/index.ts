@@ -221,6 +221,7 @@ export interface Customer {
   saved_card_brand: string | null
   delivery_fee_cents: number
   notification_preference: 'sms' | 'email' | 'sms_email' | 'none'
+  notification_topics: Record<string, boolean> | null
   created_at: string
   updated_at: string
 }

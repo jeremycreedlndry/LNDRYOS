@@ -138,9 +138,12 @@ export const customersRouter = router({
       }
 
       const geo = await maybeGeocode(input, ctx.tenantId, ctx.supabase)
+      // Omit notification_topics from INSERT — the column has a DB-level default.
+      // We only send it on explicit update so a missing schema cache entry doesn't block creation.
+      const { notification_topics: _nt, ...insertInput } = input
       const { data, error } = await ctx.supabase
         .from('customers')
-        .insert({ ...input, tenant_id: ctx.tenantId, ...geo })
+        .insert({ ...insertInput, tenant_id: ctx.tenantId, ...geo })
         .select()
         .single()
 

@@ -34,6 +34,10 @@ interface CustomerFormData {
   marketing_opt_in: string; invoice_style: string; discount_percent: string
   account_balance: string; delivery_fee: string; tax_exempt: boolean
   notification_preference: 'sms' | 'email' | 'sms_email' | 'none'
+  topic_order_confirmed: boolean
+  topic_order_ready: boolean
+  topic_pickup_reminder: boolean
+  topic_billing: boolean
   pref_bleach: string; pref_dryer_sheets: string; pref_detergent_type: string
   pref_fabric_softener: string; pref_wash_temperature: string
 }
@@ -67,6 +71,10 @@ function initForm(customer?: Customer | null): CustomerFormData {
     tax_exempt:           customer?.tax_exempt ?? false,
     delivery_fee:         customer?.delivery_fee_cents != null ? String(customer.delivery_fee_cents / 100) : '',
     notification_preference: customer?.notification_preference ?? 'sms_email',
+    topic_order_confirmed:  (customer?.notification_topics as Record<string, boolean> | null)?.order_confirmed  ?? true,
+    topic_order_ready:      (customer?.notification_topics as Record<string, boolean> | null)?.order_ready      ?? true,
+    topic_pickup_reminder:  (customer?.notification_topics as Record<string, boolean> | null)?.pickup_reminder  ?? true,
+    topic_billing:          (customer?.notification_topics as Record<string, boolean> | null)?.billing          ?? true,
     // Normalize to lowercase_underscore — customer app and older staff entries may differ in case
     pref_bleach:          normalizeOptionValue(customer?.order_preferences?.bleach ?? ''),
     pref_dryer_sheets:    normalizeOptionValue(customer?.order_preferences?.dryer_sheets ?? ''),
@@ -345,6 +353,12 @@ export function CustomerModal({ customer, onClose, onSaved }: Props) {
       // null = use tenant default; 0 = explicitly waived; >0 = custom amount
       delivery_fee_cents:        form.delivery_fee.trim() === '' ? null : Math.round((parseFloat(form.delivery_fee) || 0) * 100),
       notification_preference:   form.notification_preference,
+      notification_topics: {
+        order_confirmed:  form.topic_order_confirmed,
+        order_ready:      form.topic_order_ready,
+        pickup_reminder:  form.topic_pickup_reminder,
+        billing:          form.topic_billing,
+      },
       tax_exempt:                form.tax_exempt,
       order_preferences: {
         bleach:           form.pref_bleach || undefined,
@@ -532,6 +546,32 @@ export function CustomerModal({ customer, onClose, onSaved }: Props) {
               ))}
             </div>
           </div>
+
+          {/* Notification topics */}
+          {form.notification_preference !== 'none' && (
+            <div className="rounded-xl border border-gray-100 bg-gray-50 divide-y divide-gray-100">
+              <p className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Notify About</p>
+              {([
+                { key: 'topic_order_confirmed' as const, label: 'Order Confirmed',  desc: 'When cleaning begins' },
+                { key: 'topic_order_ready'     as const, label: 'Order Ready',       desc: 'When laundry is done' },
+                { key: 'topic_pickup_reminder' as const, label: 'Pickup Reminder',   desc: 'Day before scheduled pickup' },
+                { key: 'topic_billing'         as const, label: 'Billing',           desc: 'Invoices and payment receipts' },
+              ]).map((t) => (
+                <label key={t.key} className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{t.label}</p>
+                    <p className="text-xs text-gray-400">{t.desc}</p>
+                  </div>
+                  <div
+                    onClick={() => set(t.key, !form[t.key])}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${form[t.key] ? 'bg-brand-600' : 'bg-gray-200'}`}
+                  >
+                    <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${form[t.key] ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
 
           {/* Saved Card */}
           {customer && (

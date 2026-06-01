@@ -1,0 +1,23 @@
+/**
+ * QZ Tray public certificate — used to verify the identity of this application.
+ * The matching private key is stored in QZ_PRIVATE_KEY env var (server-side only).
+ * This certificate is NOT secret — it's the public half of the keypair.
+ */
+export const QZ_CERT = `-----BEGIN CERTIFICATE-----
+MIIC9DCCAdwCCQCu4PGNO5c2tzANBgkqhkiG9w0BAQsFADA8MRYwFAYDVQQDDA1M
+TkRSWU9TIFByaW50MRUwEwYDVQQKDAxUaGUgTE5EUlkgQ28xCzAJBgNvBAYTAkNB
+MB4XDTI2MDYwMTE2NTQyMloXDTM2MDUyOTE2NTQyMlowPDEWMBQGA1UEAwwNTE5E
+UllPUyBQcmludDEVMBMGA1UECgwMVGhlIExORFJZIENvMQswCQYDVQQGEwJDQTCC
+ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAN3DaIP1b032usB5qaG+EKpr
+qNTeXgRzSaV7dRqFcJkGkdSoK6AF0SYR2bWKFk+m+sc08O9yrj5Kte55L7qEazfx
+IdokzWok+HzQ0s6HtgRkeSimTRTDJ1X7g9vUjU4xIXpH789M4izJUrc3waOeAyiR
+JiU+08lo/BhmYUs3Q2C1PCeyKrLZT/+l0vRUQpO8q1TvJ65Ka0wreqZSvu68Ys52
+21EpSPRTOWenZGJVB0PW5QxmfttNcii58hjl2n85b5MGeF/dtSrxiP6oCj6/qIok
+PKq1rizwr5tbVqVR470torVyHaggt2rCLsVsiamkieiByXx8+tcOo18sqZLz64kC
+AwEAATANBgkqhkiG9w0BAQsFAAOCAQEAbVWX72B8+2zyxS9elgUi782w5lh+lP5R
+dnjQsJ5Pndkxz/MqIJz90Vl5/x+XMKkVPGtaZRFow90Drd6ZU3z75w5ABwiJtARW
+G3q4eQ3Z+vVW7jMUDVo2k6UW35XEmQzfUjgJMtHuysAcj13PlmfXs39lFVl57w4A
+9bw20nvFXO/vwva5R37Hj36mwki+i+a0mDmLxE7SPn6h637skR4Vfto3g8ZzkmvR
+TGhQufaY5AGGBBuXazKF36hATEwRWZc/EAmHIzqtfKKBjmF/3NxbPLOPq4huI9qc
+5OHHuY3uhdHLiCDd1SUx57gQy0YRTrXixtfhM1sdQRx0D/H6SbyKpg==
+-----END CERTIFICATE-----`

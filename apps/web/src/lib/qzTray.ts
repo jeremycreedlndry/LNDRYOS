@@ -34,18 +34,18 @@ export async function qzConnect(): Promise<void> {
     resolve(QZ_CERT)
   })
   q.security.setSignatureAlgorithm('SHA512')
-  q.security.setSignaturePromise((toSign: string) => async (resolve: (v: string) => void, reject: (e: unknown) => void) => {
-    try {
-      const res = await fetch('/api/qz-sign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request: toSign }),
+  q.security.setSignaturePromise((toSign: string) => (resolve: (v: string) => void, reject: (e: unknown) => void) => {
+    fetch('/api/qz-sign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request: toSign }),
+    })
+      .then((res) => res.json())
+      .then((json) => {
+        if (!json.signature) throw new Error(json.error ?? 'Signing failed')
+        resolve(json.signature)
       })
-      const { signature } = await res.json()
-      resolve(signature)
-    } catch (e) {
-      reject(e)
-    }
+      .catch(reject)
   })
 
   try {

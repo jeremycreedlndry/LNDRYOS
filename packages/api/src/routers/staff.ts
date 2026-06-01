@@ -201,17 +201,23 @@ export const staffRouter = router({
 
   timeEntries: tenantProcedure
     .input(z.object({
-      user_id: z.string().uuid().optional(),
-      limit:   z.number().int().default(50),
+      user_id:   z.string().uuid().optional(),
+      date_from: z.string().optional(),   // YYYY-MM-DD
+      date_to:   z.string().optional(),   // YYYY-MM-DD (inclusive)
+      limit:     z.number().int().default(500),
     }))
     .query(async ({ ctx, input }) => {
       let q = ctx.supabase
         .from('time_entries')
-        .select('*')
+        .select('*, member:tenant_members!inner(display_name, email, role)')
         .eq('tenant_id', ctx.tenantId)
         .order('clocked_in_at', { ascending: false })
         .limit(input.limit)
-      if (input.user_id) q = q.eq('user_id', input.user_id)
+
+      if (input.user_id)   q = q.eq('user_id', input.user_id)
+      if (input.date_from) q = q.gte('clocked_in_at', `${input.date_from}T00:00:00`)
+      if (input.date_to)   q = q.lte('clocked_in_at', `${input.date_to}T23:59:59`)
+
       const { data, error } = await q
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
       return data ?? []

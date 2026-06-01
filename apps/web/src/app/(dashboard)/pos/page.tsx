@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input'
 import { CancelOrderModal } from '@/components/orders/CancelOrderModal'
 import { trpc } from '@/lib/trpc'
 import { formatCurrency } from '@/lib/utils'
+import { printBagLabels, printReceipt } from '@/lib/printJobs'
 import type { Customer, ServiceItem, ItemCategory } from '@laundry/db'
 import toast from 'react-hot-toast'
 
@@ -223,6 +224,8 @@ function POSInner() {
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cartDiscountCents, setCartDiscountCents] = useState(0)
   const [cartPromoCodeId, setCartPromoCodeId] = useState<string | undefined>()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [lastCreatedOrder, setLastCreatedOrder] = useState<any>(null)
 
   const handleCartDiscountChange = (cents: number, promoCodeId?: string) => {
     setCartDiscountCents(cents)
@@ -296,6 +299,7 @@ function POSInner() {
       setPaymentOrderId(order.id as string)
       setPaymentOrderNumber(order.order_number as string)
       setOrderTotal(order.total_amount as number)
+      setLastCreatedOrder(order)
       setMobileCartOpen(false)
       // Save order preferences back to customer profile so they persist
       if (customer?.id && pendingPrefs && Object.keys(pendingPrefs).length > 0) {
@@ -311,6 +315,17 @@ function POSInner() {
         })
       }
       setPendingPrefs(null)
+      // Print bag labels if label printer configured
+      const hw = (tenantSettings?.settings as Record<string, unknown> | null)?.hardware as Record<string, unknown> | undefined
+      const labelPrinter = (hw?.label_printer as Record<string, string> | undefined)?.name
+      if (labelPrinter) {
+        const storeName = tenantSettings?.name as string | undefined
+        printBagLabels(labelPrinter, {
+          order_number: order.order_number as string,
+          customer_name: order.customer_name as string | null,
+          lines: (order.lines as Array<{ name: string; category: string; notes?: string | null }>),
+        }, storeName).catch((e) => console.warn('[label print]', e))
+      }
     },
     onError: (e) => toast.error(e.message),
   })
@@ -431,12 +446,27 @@ function POSInner() {
       }
     }
 
+    // Print receipt if receipt printer configured
+    const hw = (tenantSettings?.settings as Record<string, unknown> | null)?.hardware as Record<string, unknown> | undefined
+    const receiptPrinter = (hw?.receipt_printer as Record<string, string> | undefined)?.name
+    if (receiptPrinter && lastCreatedOrder) {
+      const storeName = tenantSettings?.name as string | undefined
+      printReceipt(receiptPrinter, {
+        order_number: lastCreatedOrder.order_number,
+        customer_name: lastCreatedOrder.customer_name,
+        lines: lastCreatedOrder.lines ?? [],
+        total_amount: lastCreatedOrder.total_amount,
+        tax_rate: taxRate,
+      }, storeName).catch((e) => console.warn('[receipt print]', e))
+    }
+
     setPaymentOrderId(null)
     setPaymentOrderNumber(null)
     setCartLines([])
     setCustomer(null)
+    setLastCreatedOrder(null)
     if (physicalGiftCards.length === 0) toast.success('Order complete!')
-  }, [cartLines, paymentOrderNumber, loadGiftCard])
+  }, [cartLines, paymentOrderNumber, loadGiftCard, lastCreatedOrder, tenantSettings, taxRate])
 
   const cartSubtotal = cartLines.reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
   const cartTaxableSubtotal = cartLines

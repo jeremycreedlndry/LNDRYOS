@@ -21,6 +21,7 @@ async function getQZ() {
 export async function qzConnect(): Promise<void> {
   const q = await getQZ()
   if (q.websocket.isActive()) return
+
   // Unsigned mode — QZ Tray will prompt the user to allow once, then remembers
   q.security.setCertificatePromise((resolve: (v: string) => void) => {
     resolve('')
@@ -29,7 +30,24 @@ export async function qzConnect(): Promise<void> {
   q.security.setSignaturePromise(() => (resolve: () => void) => {
     resolve()
   })
-  await q.websocket.connect({ retries: 2, delay: 1 })
+
+  try {
+    // Try standard WS port first (8182), then secure WSS port (8183)
+    await q.websocket.connect({ retries: 1, delay: 0.5 })
+  } catch {
+    try {
+      await q.websocket.connect({ host: 'localhost', port: { secure: [8183], insecure: [8182] }, retries: 1, delay: 0.5 })
+    } catch (e2) {
+      const msg = (e2 as Error)?.message ?? ''
+      if (msg.includes('Unable to establish') || msg.includes('refused')) {
+        throw new Error('QZ Tray is not running. Open QZ Tray on this machine and try again.')
+      }
+      if (msg.includes('trust') || msg.includes('sign') || msg.includes('Untrusted')) {
+        throw new Error('This site is not trusted by QZ Tray. Right-click the QZ Tray icon → Site Manager → add this site, then try again.')
+      }
+      throw e2
+    }
+  }
 }
 
 /** Disconnect if connected. */

@@ -22,12 +22,14 @@ export default function LoginPage() {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
 
-      // Look up the user's tenant and set cookie for tRPC context
+      // Look up the user's primary (oldest) tenant and set cookie for tRPC context
       const { data: member } = await supabase
         .from('tenant_members')
         .select('tenant_id')
         .eq('user_id', data.user.id)
-        .single()
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()
 
       if (member?.tenant_id) {
         document.cookie = `tenant_id=${member.tenant_id}; path=/; max-age=31536000`

@@ -33,7 +33,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (tenantIdFromCookie) {
     query = query.eq('tenant_id', tenantIdFromCookie)
   } else {
-    query = query.order('created_at', { ascending: false })
+    query = query.order('created_at', { ascending: true })  // oldest = primary tenant
   }
 
   const { data: member } = await query.limit(1).maybeSingle()

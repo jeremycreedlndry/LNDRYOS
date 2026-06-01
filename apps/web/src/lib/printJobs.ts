@@ -130,30 +130,23 @@ function buildBagLabelZPL(data: BagLabelData): string {
   ].join('\n')
 }
 
-// ─── ESC/POS Receipt ──────────────────────────────────────────────────────────
-
 // ─── ESC/POS + Star commands ──────────────────────────────────────────────────
 
 const ESC = '\x1B'
+const GS  = '\x1D'
 
-const INIT     = ESC + '@'           // initialize printer
-const CENTER   = ESC + 'a\x01'
-const LEFT     = ESC + 'a\x00'
-const BOLD_ON  = ESC + 'E\x01'
-const BOLD_OFF = ESC + 'E\x00'
-const LARGE    = ESC + '!\x30'       // double width + double height
-const NORMAL   = ESC + '!\x00'
-const SMALL    = ESC + '!\x01'       // condensed
-// Star full cut (works on TSP100/TSP650 in Star mode and ESC/POS emulation)
-const CUT      = ESC + 'd\x05' + ESC + 'i'
+const INIT       = ESC + '@'         // reset printer
+const CENTER     = ESC + 'a\x01'     // center align
+const LEFT       = ESC + 'a\x00'     // left align
+const BOLD_ON    = ESC + 'E\x01'
+const BOLD_OFF   = ESC + 'E\x00'
+// ESC ! 0x38 = double-height + double-width + bold in one command
+const LARGE_BOLD = ESC + '!\x38'
+const NORMAL     = ESC + '!\x00'
+// Cut: Star Line mode (ESC d n + ESC i) AND ESC/POS fallback (GS V A n) — printer uses whichever it knows
+const CUT = ESC + '\x64\x05' + ESC + '\x69' + GS + '\x56\x41\x10'
 
-const W = 32  // chars at normal size on 58mm paper
-
-function center(text: string, width = W): string {
-  const t = text.slice(0, width)
-  const pad = Math.max(0, Math.floor((width - t.length) / 2))
-  return ' '.repeat(pad) + t + '\n'
-}
+const W = 32  // chars per line at normal size on 58mm paper
 
 function padLine(left: string, right: string, width = W): string {
   const l = left.slice(0, width - right.length - 1)
@@ -163,53 +156,64 @@ function padLine(left: string, right: string, width = W): string {
 
 const DASH = '-'.repeat(W) + '\n'
 
-function buildReceiptESCPOS(data: ReceiptData): string {
+// Parse notes stored as "Key: Val · Key: Val" into individual lines
+function parseNotes(lines: ReceiptLine[]): string[] {
+  const raw = lines
+    .map((l) => l.notes)
+    .filter(Boolean)
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .join(' · ')
+  if (!raw) return []
+  return raw.split(' · ').map((s) => s.trim()).filter(Boolean)
+}
+
+function buildOneCopy(data: ReceiptData, copyLabel: string): string {
   const droppedOff = data.droppedOffDate
     ?? new Date().toLocaleDateString('en-CA', { month: '2-digit', day: '2-digit', year: '2-digit' })
 
-  const pieces = data.lines
-    .filter((l) => l.unitLabel !== 'lb')
-    .reduce((s, l) => s + l.quantity, 0)
-  const totalLbs = data.lines
-    .filter((l) => l.unitLabel === 'lb')
-    .reduce((s, l) => s + l.quantity, 0)
+  const totalLbs = data.lines.filter((l) => l.unitLabel === 'lb').reduce((s, l) => s + l.quantity, 0)
+  const pieces   = data.lines.filter((l) => l.unitLabel !== 'lb').reduce((s, l) => s + l.quantity, 0)
   const piecesLine = totalLbs > 0
     ? `${totalLbs.toFixed(1)} lbs`
     : `${pieces} Piece${pieces !== 1 ? 's' : ''}`
 
-  // Collect order notes from line notes (preferences)
-  const noteStrings = data.lines
-    .map((l) => l.notes)
-    .filter(Boolean)
-    .filter((v, i, a) => a.indexOf(v) === i) // dedupe
-  const notesBlock = data.orderNotes
-    ? [data.orderNotes]
-    : noteStrings as string[]
+  const notes = parseNotes(data.lines)
 
-  const parts: string[] = [
+  // Compact ready date: "Tue Jun 3" — short enough to fit on one LARGE line
+  const readyShort = data.readyDate
+    ? data.readyDate.replace(/\d{4}$/, '').trim()  // strip year if present
+    : null
+
+  return [
     INIT,
     CENTER,
+
+    // ── Copy label ──
+    `***** ${copyLabel} *****\n`,
+    '\n',
 
     // ── Order # + pieces ──
     BOLD_ON, `#${data.orderNumber}\n`, BOLD_OFF,
     `${piecesLine}\n`,
     '\n',
 
-    // ── Store header ──
-    BOLD_ON, LARGE,
-    center(data.storeName ?? 'The Laundry Co.', W),
-    NORMAL, BOLD_OFF,
-    ...(data.storeAddress ? [center(data.storeAddress, W)] : []),
-    ...(data.storeCityPostal ? [center(data.storeCityPostal, W)] : []),
-    ...(data.storePhone ? [center(`Tel: ${data.storePhone}`, W)] : []),
-    ...(data.staffName ? [center(`Served By: ${data.staffName}`, W)] : []),
+    // ── Store name (large) ──
+    LARGE_BOLD,
+    `${data.storeName ?? 'The Laundry Co.'}\n`,
+    NORMAL,
+
+    // ── Store details (small) ──
+    ...(data.storeAddress    ? [`${data.storeAddress}\n`]       : []),
+    ...(data.storeCityPostal ? [`${data.storeCityPostal}\n`]    : []),
+    ...(data.storePhone      ? [`Tel: ${data.storePhone}\n`]    : []),
+    ...(data.staffName       ? [`Served By: ${data.staffName}\n`] : []),
     '\n',
 
-    // ── Customer ──
-    BOLD_ON, LARGE,
-    center(data.customerName || 'Walk-in', W),
-    NORMAL, BOLD_OFF,
-    ...(data.customerPhone ? [center(data.customerPhone, W)] : []),
+    // ── Customer name (large) + phone ──
+    LARGE_BOLD,
+    `${data.customerName || 'Walk-in'}\n`,
+    NORMAL,
+    ...(data.customerPhone ? [`${data.customerPhone}\n`] : []),
     DASH,
 
     // ── Line items ──
@@ -230,30 +234,36 @@ function buildReceiptESCPOS(data: ReceiptData): string {
     CENTER, `${data.paymentMethod}\n`,
     DASH,
 
-    // ── Notes + dates ──
+    // ── Notes ──
     LEFT,
-    ...(notesBlock.length > 0 ? [
-      `Notes: ${notesBlock.join('\n       ')}\n`,
+    ...(notes.length > 0 ? [
+      `Notes: ${notes[0]}\n`,
+      ...notes.slice(1).map((n) => `${n}\n`),
       '\n',
     ] : []),
+
+    // ── Dropped off ──
     `Dropped Off: ${droppedOff}\n`,
     '\n',
 
-    // ── Ready date (large) ──
-    ...(data.readyDate ? [
-      CENTER, BOLD_ON, LARGE,
-      center(`Ready: ${data.readyDate}`, W),
-      NORMAL, BOLD_OFF,
+    // ── Ready date (large, centered) ──
+    ...(readyShort ? [
+      CENTER,
+      LARGE_BOLD,
+      `Ready: ${readyShort}\n`,
+      NORMAL,
     ] : []),
 
     '\n',
     CENTER,
     'Thank you for your business!\n',
-    '\n',
+    '\n\n\n',
     CUT,
-  ]
+  ].join('')
+}
 
-  return parts.join('')
+function buildReceiptESCPOS(data: ReceiptData): string {
+  return buildOneCopy(data, 'Customer Copy') + buildOneCopy(data, 'Store Copy')
 }
 
 // ─── Public print functions ───────────────────────────────────────────────────
@@ -369,8 +379,6 @@ export async function printReceipt(
     readyDate,
   }
 
-  const raw = buildReceiptESCPOS(data)
-  // Print 2 copies: customer copy + store copy
-  await qzPrintRaw(printerName, raw)
-  await qzPrintRaw(printerName, raw)
+  // buildReceiptESCPOS includes both Customer Copy + Store Copy + cut between them
+  await qzPrintRaw(printerName, buildReceiptESCPOS(data))
 }

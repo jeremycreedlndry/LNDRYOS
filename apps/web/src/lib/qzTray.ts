@@ -32,21 +32,21 @@ export async function qzConnect(): Promise<void> {
   })
 
   try {
-    // Try standard WS port first (8182), then secure WSS port (8183)
-    await q.websocket.connect({ retries: 1, delay: 0.5 })
-  } catch {
-    try {
-      await q.websocket.connect({ host: 'localhost', port: { secure: [8183], insecure: [8182] }, retries: 1, delay: 0.5 })
-    } catch (e2) {
-      const msg = (e2 as Error)?.message ?? ''
-      if (msg.includes('Unable to establish') || msg.includes('refused')) {
-        throw new Error('QZ Tray is not running. Open QZ Tray on this machine and try again.')
-      }
-      if (msg.includes('trust') || msg.includes('sign') || msg.includes('Untrusted')) {
-        throw new Error('This site is not trusted by QZ Tray. Right-click the QZ Tray icon → Site Manager → add this site, then try again.')
-      }
-      throw e2
+    // Use secure WSS port (8183) for HTTPS pages, plain WS (8182) for HTTP
+    // This prevents browser mixed-content blocks when on HTTPS
+    await q.websocket.connect({
+      host: 'localhost',
+      port: { secure: [8183], insecure: [8182] },
+      usingSecure: window.location.protocol === 'https:',
+      retries: 2,
+      delay: 0.5,
+    })
+  } catch (e) {
+    const msg = (e as Error)?.message ?? String(e)
+    if (msg.includes('Unable to establish') || msg.includes('refused') || msg.includes('ECONNREFUSED')) {
+      throw new Error('QZ Tray is not running. Open QZ Tray on this machine and try again.')
     }
+    throw e
   }
 }
 

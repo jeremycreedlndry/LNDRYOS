@@ -20,18 +20,26 @@ import { cn } from '@/lib/utils'
 import { ClockWidget } from './ClockWidget'
 import { trpc } from '@/lib/trpc'
 
-const NAV = [
-  { href: '/pos',       label: 'POS',       icon: ShoppingCart },
-  { href: '/orders',    label: 'Orders',    icon: ClipboardList },
-  { href: '/workflow',  label: 'Workflow',  icon: Workflow },
-  { href: '/pickups',   label: 'Pickups',   icon: Truck, requestBadge: true },
-  { href: '/customers', label: 'Customers', icon: Users },
-  { href: '/invoices',    label: 'Invoices',    icon: FileText },
-  { href: '/gift-cards', label: 'Gift Cards',  icon: Gift },
-  { href: '/search',     label: 'Search',      icon: Search },
-  { href: '/inbox',     label: 'Inbox',     icon: MessageSquare, badge: true },
-  { href: '/reports',   label: 'Reports',   icon: BarChart2 },
-  { href: '/settings',  label: 'Settings',  icon: Settings },
+// permission key → which permission field controls this route (null = always visible)
+const NAV: {
+  href: string
+  label: string
+  icon: React.ElementType
+  badge?: boolean
+  requestBadge?: boolean
+  permission?: string | null  // null = always visible to all roles
+}[] = [
+  { href: '/pos',        label: 'POS',        icon: ShoppingCart,  permission: 'pos' },
+  { href: '/orders',     label: 'Orders',      icon: ClipboardList, permission: 'orders' },
+  { href: '/workflow',   label: 'Workflow',    icon: Workflow,      permission: 'orders' },
+  { href: '/pickups',    label: 'Pickups',     icon: Truck,         permission: 'orders', requestBadge: true },
+  { href: '/customers',  label: 'Customers',   icon: Users,         permission: 'customers' },
+  { href: '/invoices',   label: 'Invoices',    icon: FileText,      permission: 'manage_invoices' },
+  { href: '/gift-cards', label: 'Gift Cards',  icon: Gift,          permission: 'pos' },
+  { href: '/search',     label: 'Search',      icon: Search,        permission: null },
+  { href: '/inbox',      label: 'Inbox',       icon: MessageSquare, permission: null, badge: true },
+  { href: '/reports',    label: 'Reports',     icon: BarChart2,     permission: 'reports' },
+  { href: '/settings',   label: 'Settings',    icon: Settings,      permission: 'settings' },
 ]
 
 interface Props {
@@ -40,14 +48,24 @@ interface Props {
 
 export function Sidebar({ tenantName }: Props) {
   const pathname = usePathname()
-  const { data: unread } = trpc.messages.unreadCount.useQuery(undefined, {
-    refetchInterval: 30_000,
-  })
+
+  const { data: unread } = trpc.messages.unreadCount.useQuery(undefined, { refetchInterval: 30_000 })
   const unreadCount = unread?.count ?? 0
-  const { data: pendingReqs } = trpc.pickupStops.countPendingRequests.useQuery(undefined, {
-    refetchInterval: 30_000,
-  })
+
+  const { data: pendingReqs } = trpc.pickupStops.countPendingRequests.useQuery(undefined, { refetchInterval: 30_000 })
   const pendingCount = pendingReqs?.count ?? 0
+
+  const { data: myRole } = trpc.staff.myRole.useQuery(undefined, { staleTime: 60_000 })
+  const role  = myRole?.role ?? 'staff'
+  const perms = (myRole?.permissions ?? {}) as Record<string, unknown>
+  const isPrivileged = role === 'owner' || role === 'manager'
+
+  const visibleNav = NAV.filter(({ permission }) => {
+    if (isPrivileged) return true          // owners & managers see everything
+    if (permission === null) return true   // always-visible items
+    if (!permission) return false          // no permission key = hidden from staff
+    return perms[permission] === true      // staff need explicit permission
+  })
 
   return (
     <aside className="hidden lg:flex w-56 shrink-0 flex-col border-r border-gray-200 bg-white">
@@ -59,7 +77,7 @@ export function Sidebar({ tenantName }: Props) {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {NAV.map(({ href, label, icon: Icon, badge, requestBadge }) => {
+        {visibleNav.map(({ href, label, icon: Icon, badge, requestBadge }) => {
           const active = pathname.startsWith(href)
           const showBadge = badge && unreadCount > 0
           const showRequestBadge = requestBadge && pendingCount > 0

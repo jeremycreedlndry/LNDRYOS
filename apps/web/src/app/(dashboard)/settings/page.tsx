@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { RequirePermission } from '@/components/layout/RequirePermission'
 import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, X, Check, GripVertical } from 'lucide-react'
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent,
@@ -565,7 +566,7 @@ function ServicesTab() {
 
 type Tab = 'services' | 'store' | 'preferences' | 'machines' | 'folding' | 'integrations' | 'delivery' | 'staff' | 'businesses' | 'hardware' | 'promos'
 
-export default function SettingsPage() {
+function SettingsContent() {
   const [tab, setTab] = useState<Tab>('services')
   return (
     <div className="mx-auto max-w-2xl px-6 py-8">
@@ -602,5 +603,13 @@ export default function SettingsPage() {
       {tab === 'hardware'     && <HardwareTab />}
       {tab === 'promos'       && <PromoCodesTab />}
     </div>
+  )
+}
+
+export default function SettingsPage() {
+  return (
+    <RequirePermission permission="settings">
+      <SettingsContent />
+    </RequirePermission>
   )
 }

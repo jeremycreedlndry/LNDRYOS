@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { trpc } from '@/lib/trpc'
 import { Clock, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { RequirePermission } from '@/components/layout/RequirePermission'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ function formatDecimalHours(minutes: number): string {
 
 // ─── Staff Hours Report ───────────────────────────────────────────────────────
 
-export default function ReportsPage() {
+function ReportsContent() {
   const today = toLocalDateString(new Date())
   // Default: current week (Mon → today)
   const monday = useMemo(() => {
@@ -306,5 +307,13 @@ export default function ReportsPage() {
 
       </div>
     </div>
+  )
+}
+
+export default function ReportsPage() {
+  return (
+    <RequirePermission permission="reports">
+      <ReportsContent />
+    </RequirePermission>
   )
 }

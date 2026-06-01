@@ -207,9 +207,10 @@ export const staffRouter = router({
       limit:     z.number().int().default(500),
     }))
     .query(async ({ ctx, input }) => {
+      // Fetch entries
       let q = ctx.supabase
         .from('time_entries')
-        .select('*, member:tenant_members!inner(display_name, email, role)')
+        .select('*')
         .eq('tenant_id', ctx.tenantId)
         .order('clocked_in_at', { ascending: false })
         .limit(input.limit)
@@ -218,8 +219,20 @@ export const staffRouter = router({
       if (input.date_from) q = q.gte('clocked_in_at', `${input.date_from}T00:00:00`)
       if (input.date_to)   q = q.lte('clocked_in_at', `${input.date_to}T23:59:59`)
 
-      const { data, error } = await q
+      const { data: entries, error } = await q
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
-      return data ?? []
+      if (!entries?.length) return []
+
+      // Fetch member names for each unique user_id
+      const userIds = [...new Set(entries.map((e) => e.user_id))]
+      const { data: members } = await ctx.supabase
+        .from('tenant_members')
+        .select('user_id, display_name, email, role')
+        .eq('tenant_id', ctx.tenantId)
+        .in('user_id', userIds)
+
+      const memberMap = new Map((members ?? []).map((m) => [m.user_id, m]))
+
+      return entries.map((e) => ({ ...e, member: memberMap.get(e.user_id) ?? null }))
     }),
 })

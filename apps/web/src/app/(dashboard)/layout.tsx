@@ -5,6 +5,7 @@ import { createSupabaseServiceClient } from '@laundry/db'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { TopBar } from '@/components/layout/TopBar'
 import { MobileNav } from '@/components/layout/MobileNav'
+import { ClockInGate } from '@/components/layout/ClockInGate'
 import { NayaxTapListener } from '@/components/nayax/NayaxTapListener'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -25,7 +26,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Prefer the tenant_id cookie (same one tRPC uses) so the name stays in sync
   let query = service
     .from('tenant_members')
-    .select('tenant_id, role, tenants(name, slug, status)')
+    .select('tenant_id, role, display_name, tenants(name, slug, status)')
     .eq('user_id', user.id)
 
   if (tenantIdFromCookie) {
@@ -38,17 +39,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!member) redirect('/onboarding')
 
+  const role        = (member.role        as string) ?? 'staff'
+  const displayName = (member.display_name as string | null) ?? ''
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar tenantName={(member.tenants as { name: string })?.name ?? ''} />
+      <Sidebar tenantName={(member.tenants as unknown as { name: string })?.name ?? ''} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <TopBar />
+        <TopBar role={role} />
         <main className="flex-1 overflow-auto pb-16 lg:pb-0">
           {children}
         </main>
       </div>
       <MobileNav />
       <NayaxTapListener userId={user.id} tenantId={member.tenant_id} />
+      <ClockInGate role={role} displayName={displayName} />
     </div>
   )
 }

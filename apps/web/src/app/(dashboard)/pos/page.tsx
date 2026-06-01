@@ -450,14 +450,23 @@ function POSInner() {
     const hw = (tenantSettings?.settings as Record<string, unknown> | null)?.hardware as Record<string, unknown> | undefined
     const receiptPrinter = (hw?.receipt_printer as Record<string, string> | undefined)?.name
     if (receiptPrinter && lastCreatedOrder) {
-      const storeName = tenantSettings?.name as string | undefined
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const addr = (tenantSettings as any)?.address as Record<string, string> | undefined
       printReceipt(receiptPrinter, {
-        order_number: lastCreatedOrder.order_number,
-        customer_name: lastCreatedOrder.customer_name,
-        lines: lastCreatedOrder.lines ?? [],
-        total_amount: lastCreatedOrder.total_amount,
-        tax_rate: taxRate,
-      }, storeName).catch((e) => console.warn('[receipt print]', e))
+        order_number:   lastCreatedOrder.order_number,
+        customer_name:  lastCreatedOrder.customer_name,
+        customer_phone: customer?.phone ?? null,
+        lines:          lastCreatedOrder.lines ?? [],
+        total_amount:   lastCreatedOrder.total_amount,
+        tax_rate:       taxRate,
+        due_date:       lastCreatedOrder.due_date ?? null,
+      }, {
+        name:       tenantSettings?.name as string | undefined,
+        address:    addr?.street ?? null,
+        cityPostal: addr ? [addr.city, addr.postal_code].filter(Boolean).join(', ') : null,
+        phone:      (tenantSettings?.settings as Record<string, unknown> | null)?.phone as string ?? null,
+      }, (myRole as Record<string, unknown> | undefined)?.display_name as string ?? null)
+        .catch((e) => console.warn('[receipt print]', e))
     }
 
     setPaymentOrderId(null)

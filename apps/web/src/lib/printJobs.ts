@@ -40,17 +40,26 @@ export interface ReceiptLine {
   quantity: number
   unitPrice: number
   unitLabel: string
+  notes?: string | null
 }
 
 export interface ReceiptData {
   orderNumber: string
   customerName: string
+  customerPhone?: string | null
   lines: ReceiptLine[]
   subtotalCents: number
   taxCents: number
   totalCents: number
   paymentMethod: string
   storeName?: string
+  storeAddress?: string | null
+  storeCityPostal?: string | null
+  storePhone?: string | null
+  staffName?: string | null
+  droppedOffDate?: string | null
+  readyDate?: string | null
+  orderNotes?: string | null
   date?: string
 }
 
@@ -123,61 +132,124 @@ function buildBagLabelZPL(data: BagLabelData): string {
 
 // ─── ESC/POS Receipt ──────────────────────────────────────────────────────────
 
-const ESC = '\x1B'
-const GS  = '\x1D'
+// ─── ESC/POS + Star commands ──────────────────────────────────────────────────
 
+const ESC = '\x1B'
+
+const INIT     = ESC + '@'           // initialize printer
 const CENTER   = ESC + 'a\x01'
 const LEFT     = ESC + 'a\x00'
 const BOLD_ON  = ESC + 'E\x01'
 const BOLD_OFF = ESC + 'E\x00'
-const DOUBLE   = ESC + '!\x18'
+const LARGE    = ESC + '!\x30'       // double width + double height
 const NORMAL   = ESC + '!\x00'
-const INIT     = ESC + '@'
-const FEED3    = '\n\n\n'
-const CUT      = GS + 'V\x41\x03'
+const SMALL    = ESC + '!\x01'       // condensed
+// Star full cut (works on TSP100/TSP650 in Star mode and ESC/POS emulation)
+const CUT      = ESC + 'd\x05' + ESC + 'i'
 
-function padLine(left: string, right: string, width = 42): string {
-  const gap = width - left.length - right.length
-  return left + ' '.repeat(Math.max(1, gap)) + right + '\n'
+const W = 32  // chars at normal size on 58mm paper
+
+function center(text: string, width = W): string {
+  const t = text.slice(0, width)
+  const pad = Math.max(0, Math.floor((width - t.length) / 2))
+  return ' '.repeat(pad) + t + '\n'
 }
 
+function padLine(left: string, right: string, width = W): string {
+  const l = left.slice(0, width - right.length - 1)
+  const gap = width - l.length - right.length
+  return l + ' '.repeat(Math.max(1, gap)) + right + '\n'
+}
+
+const DASH = '-'.repeat(W) + '\n'
+
 function buildReceiptESCPOS(data: ReceiptData): string {
-  const store = data.storeName ?? 'LNDRYOS'
-  const date  = data.date ?? new Date().toLocaleString('en-CA', {
-    month: 'short', day: 'numeric', year: 'numeric',
-    hour: 'numeric', minute: '2-digit', hour12: true,
-  })
+  const droppedOff = data.droppedOffDate
+    ?? new Date().toLocaleDateString('en-CA', { month: '2-digit', day: '2-digit', year: '2-digit' })
+
+  const pieces = data.lines
+    .filter((l) => l.unitLabel !== 'lb')
+    .reduce((s, l) => s + l.quantity, 0)
+  const totalLbs = data.lines
+    .filter((l) => l.unitLabel === 'lb')
+    .reduce((s, l) => s + l.quantity, 0)
+  const piecesLine = totalLbs > 0
+    ? `${totalLbs.toFixed(1)} lbs`
+    : `${pieces} Piece${pieces !== 1 ? 's' : ''}`
+
+  // Collect order notes from line notes (preferences)
+  const noteStrings = data.lines
+    .map((l) => l.notes)
+    .filter(Boolean)
+    .filter((v, i, a) => a.indexOf(v) === i) // dedupe
+  const notesBlock = data.orderNotes
+    ? [data.orderNotes]
+    : noteStrings as string[]
 
   const parts: string[] = [
     INIT,
     CENTER,
-    DOUBLE,
-    `${store}\n`,
-    NORMAL,
-    `${date}\n`,
-    BOLD_ON,
-    `Order #${data.orderNumber}\n`,
-    BOLD_OFF,
-    `${data.customerName || 'Walk-in'}\n`,
+
+    // ── Order # + pieces ──
+    BOLD_ON, `#${data.orderNumber}\n`, BOLD_OFF,
+    `${piecesLine}\n`,
+    '\n',
+
+    // ── Store header ──
+    BOLD_ON, LARGE,
+    center(data.storeName ?? 'The Laundry Co.', W),
+    NORMAL, BOLD_OFF,
+    ...(data.storeAddress ? [center(data.storeAddress, W)] : []),
+    ...(data.storeCityPostal ? [center(data.storeCityPostal, W)] : []),
+    ...(data.storePhone ? [center(`Tel: ${data.storePhone}`, W)] : []),
+    ...(data.staffName ? [center(`Served By: ${data.staffName}`, W)] : []),
+    '\n',
+
+    // ── Customer ──
+    BOLD_ON, LARGE,
+    center(data.customerName || 'Walk-in', W),
+    NORMAL, BOLD_OFF,
+    ...(data.customerPhone ? [center(data.customerPhone, W)] : []),
+    DASH,
+
+    // ── Line items ──
     LEFT,
-    '-'.repeat(42) + '\n',
     ...data.lines.map((l) => {
       const qty   = l.unitLabel === 'lb' ? `${l.quantity.toFixed(1)} lb` : `x${l.quantity}`
       const price = formatCurrency(Math.round(l.quantity * l.unitPrice))
-      return padLine(`${l.name.slice(0, 28)} ${qty}`, price)
+      return padLine(`${l.name} ${qty}`, price)
     }),
-    '-'.repeat(42) + '\n',
-    padLine('Subtotal', formatCurrency(data.subtotalCents)),
-    data.taxCents > 0 ? padLine('Tax', formatCurrency(data.taxCents)) : '',
+    DASH,
+
+    // ── Totals ──
+    padLine('SUBTOTAL:', formatCurrency(data.subtotalCents)),
+    ...(data.taxCents > 0 ? [padLine('TAX:', formatCurrency(data.taxCents))] : []),
     BOLD_ON,
-    padLine('TOTAL', formatCurrency(data.totalCents)),
+    padLine('TOTAL:', formatCurrency(data.totalCents)),
     BOLD_OFF,
-    padLine('Payment', data.paymentMethod),
-    '-'.repeat(42) + '\n',
+    CENTER, `${data.paymentMethod}\n`,
+    DASH,
+
+    // ── Notes + dates ──
+    LEFT,
+    ...(notesBlock.length > 0 ? [
+      `Notes: ${notesBlock.join('\n       ')}\n`,
+      '\n',
+    ] : []),
+    `Dropped Off: ${droppedOff}\n`,
+    '\n',
+
+    // ── Ready date (large) ──
+    ...(data.readyDate ? [
+      CENTER, BOLD_ON, LARGE,
+      center(`Ready: ${data.readyDate}`, W),
+      NORMAL, BOLD_OFF,
+    ] : []),
+
+    '\n',
     CENTER,
-    'Thank you!\n',
-    'lndryos.com\n',
-    FEED3,
+    'Thank you for your business!\n',
+    '\n',
     CUT,
   ]
 
@@ -252,28 +324,49 @@ export async function printReceipt(
   order: {
     order_number: string
     customer_name?: string | null
-    lines: Array<{ name: string; category: string; quantity: number; unit_price: number; unit_label: string }>
+    customer_phone?: string | null
+    lines: Array<{ name: string; category: string; quantity: number; unit_price: number; unit_label: string; notes?: string | null }>
     total_amount: number
     tax_rate?: number
     payment_method?: string
+    due_date?: string | null
   },
-  storeName?: string,
+  store?: {
+    name?: string
+    address?: string | null
+    cityPostal?: string | null
+    phone?: string | null
+  },
+  staffName?: string | null,
 ): Promise<void> {
   const subtotal = order.lines.reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
   const taxCents = order.total_amount - subtotal
 
+  const readyDate = order.due_date
+    ? new Date(order.due_date + 'T12:00:00').toLocaleDateString('en-CA', {
+        weekday: 'short', month: 'numeric', day: 'numeric',
+      })
+    : null
+
   const data: ReceiptData = {
-    orderNumber:  order.order_number,
-    customerName: order.customer_name ?? 'Walk-in',
+    orderNumber:   order.order_number,
+    customerName:  order.customer_name ?? 'Walk-in',
+    customerPhone: order.customer_phone,
     lines: order.lines.map((l) => ({
       name: l.name, quantity: l.quantity,
       unitPrice: l.unit_price, unitLabel: l.unit_label,
+      notes: l.notes,
     })),
-    subtotalCents: subtotal,
-    taxCents: Math.max(0, taxCents),
-    totalCents:   order.total_amount,
-    paymentMethod: order.payment_method ?? 'Paid',
-    storeName,
+    subtotalCents:  subtotal,
+    taxCents:       Math.max(0, taxCents),
+    totalCents:     order.total_amount,
+    paymentMethod:  order.payment_method ?? 'Paid',
+    storeName:      store?.name,
+    storeAddress:   store?.address,
+    storeCityPostal: store?.cityPostal,
+    storePhone:     store?.phone,
+    staffName,
+    readyDate,
   }
 
   const raw = buildReceiptESCPOS(data)

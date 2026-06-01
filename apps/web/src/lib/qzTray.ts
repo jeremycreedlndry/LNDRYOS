@@ -21,13 +21,13 @@ async function getQZ() {
 export async function qzConnect(): Promise<void> {
   const q = await getQZ()
   if (q.websocket.isActive()) return
-  // Use unsigned / self-signed mode — QZ Tray will prompt user to allow once
-  q.security.setCertificatePromise((_resolve: (v: string) => void, reject: (v: string) => void) => {
-    reject('unsigned')
+  // Unsigned mode — QZ Tray will prompt the user to allow once, then remembers
+  q.security.setCertificatePromise((resolve: (v: string) => void) => {
+    resolve('')
   })
   q.security.setSignatureAlgorithm('SHA512')
-  q.security.setSignaturePromise(() => (_resolve: () => void, reject: () => void) => {
-    reject()
+  q.security.setSignaturePromise(() => (resolve: () => void) => {
+    resolve()
   })
   await q.websocket.connect({ retries: 2, delay: 1 })
 }

@@ -32,18 +32,10 @@ export async function qzConnect(): Promise<void> {
   })
 
   try {
-    // Use secure WSS port (8183) for HTTPS pages, plain WS (8182) for HTTP
-    // This prevents browser mixed-content blocks when on HTTPS
-    await q.websocket.connect({
-      host: 'localhost',
-      port: { secure: [8183], insecure: [8182] },
-      usingSecure: window.location.protocol === 'https:',
-      retries: 2,
-      delay: 0.5,
-    })
+    await q.websocket.connect({ host: 'localhost', port: 8182, retries: 2, delay: 0.5 })
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e)
-    if (msg.includes('Unable to establish') || msg.includes('refused') || msg.includes('ECONNREFUSED')) {
+    if (msg.includes('Unable to establish') || msg.includes('refused')) {
       throw new Error('QZ Tray is not running. Open QZ Tray on this machine and try again.')
     }
     throw e

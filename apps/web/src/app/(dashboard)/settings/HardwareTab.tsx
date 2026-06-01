@@ -1,11 +1,63 @@
 'use client'
 
-import { useState } from 'react'
-import { Printer, CreditCard, Check, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Printer, CreditCard, Check, X, ChevronDown, ChevronUp, Search, Zap } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import { qzListPrinters, qzPrintZPL, qzPrintRaw } from '@/lib/qzTray'
 import toast from 'react-hot-toast'
+
+// ─── Printer picker modal ─────────────────────────────────────────────────────
+
+function PrinterPickerModal({ onSelect, onClose }: {
+  onSelect: (name: string) => void
+  onClose: () => void
+}) {
+  const [printers, setPrinters] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState<string | null>(null)
+
+  // Discover on mount
+  useEffect(() => {
+    qzListPrinters()
+      .then(setPrinters)
+      .catch((e) => setError(e?.message ?? 'Could not connect to QZ Tray. Make sure it is running.'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 className="text-base font-semibold text-gray-900">Select Printer</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="p-2 max-h-72 overflow-y-auto">
+          {loading && (
+            <p className="text-sm text-gray-400 text-center py-8 animate-pulse">Discovering printers…</p>
+          )}
+          {error && (
+            <p className="text-sm text-red-500 text-center py-8 px-4">{error}</p>
+          )}
+          {!loading && !error && printers.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-8">No printers found.</p>
+          )}
+          {printers.map((p) => (
+            <button
+              key={p}
+              onClick={() => { onSelect(p); onClose() }}
+              className="w-full text-left px-4 py-3 rounded-lg text-sm text-gray-800 hover:bg-gray-50 transition-colors"
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ─── Shared collapse card (same pattern as IntegrationsTab) ───────────────────
 
@@ -200,6 +252,8 @@ function PrinterSection({ type, label, description, defaultConnection }: {
   const [share,      setShare]      = useState(saved.share      ?? '')
   const [address,    setAddress]    = useState(saved.address    ?? '')
   const [dirty,      setDirty]      = useState(false)
+  const [showPicker, setShowPicker] = useState(false)
+  const [testing,    setTesting]    = useState(false)
 
   const configured = !!(saved.name || saved.ip || saved.host || saved.address)
 
@@ -228,6 +282,48 @@ function PrinterSection({ type, label, description, defaultConnection }: {
 
   const mark = () => setDirty(true)
 
+  const handleTestPrint = async () => {
+    const printerName = name.trim() || saved.name
+    if (!printerName) { toast.error('Save a printer name first'); return }
+    setTesting(true)
+    try {
+      if (type === 'label') {
+        // ZPL test label for Zebra/TSC
+        const zpl = [
+          '^XA',
+          '^CF0,40',
+          '^FO50,50^FDLNDRYOS Test Label^FS',
+          '^CF0,28',
+          '^FO50,110^FDLabel Printer OK^FS',
+          '^FO50,150^FD' + new Date().toLocaleString() + '^FS',
+          '^XZ',
+        ].join('\n')
+        await qzPrintZPL(printerName, zpl)
+      } else {
+        // ESC/POS plain-text test for receipt printer
+        const ESC = '\x1B'
+        const data = [
+          ESC + '@',             // init
+          ESC + 'a\x01',        // center align
+          ESC + '!\x18',        // double-width + double-height
+          'LNDRYOS\n',
+          ESC + '!\x00',        // normal
+          'Receipt Printer OK\n',
+          new Date().toLocaleString() + '\n',
+          '\n\n\n',
+          ESC + 'i',            // full cut
+        ].join('')
+        await qzPrintRaw(printerName, data)
+      }
+      toast.success('Test print sent!')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      toast.error(`Print failed: ${msg}`)
+    } finally {
+      setTesting(false)
+    }
+  }
+
   // Summary line shown in status badge
   const statusLine = saved.name
     ? saved.name
@@ -251,7 +347,25 @@ function PrinterSection({ type, label, description, defaultConnection }: {
         {/* Printer name */}
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1.5">Printer name</label>
-          <Input value={name} onChange={(e) => { setName(e.target.value); mark() }} placeholder={`e.g. ${label}`} />
+          <div className="flex gap-2">
+            <Input
+              value={name}
+              onChange={(e) => { setName(e.target.value); mark() }}
+              placeholder={`e.g. ${label}`}
+              className="flex-1"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPicker(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 whitespace-nowrap"
+            >
+              <Search className="h-3.5 w-3.5" />
+              Find Printer
+            </button>
+          </div>
+          <p className="text-[10px] text-gray-400 mt-1">
+            As it appears in Windows Control Panel → Devices and Printers. Use &quot;Find Printer&quot; to auto-discover via QZ Tray.
+          </p>
         </div>
 
         {/* Connection type */}
@@ -332,10 +446,26 @@ function PrinterSection({ type, label, description, defaultConnection }: {
           </div>
         )}
 
-        <div className="flex gap-2 pt-1">
-          <Button onClick={handleSave} disabled={!dirty || update.isPending} className="flex-1">
+        <div className="flex gap-2 pt-1 flex-wrap">
+          <Button onClick={handleSave} disabled={!dirty || update.isPending} className="flex-1 min-w-[80px]">
             {update.isPending ? 'Saving…' : 'Save'}
           </Button>
+          {(configured || name) && (
+            <button
+              type="button"
+              onClick={handleTestPrint}
+              disabled={testing}
+              className={cn(
+                'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
+                testing
+                  ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'border-brand-200 text-brand-700 hover:bg-brand-50',
+              )}
+            >
+              <Zap className="h-3.5 w-3.5" />
+              {testing ? 'Printing…' : 'Test Print'}
+            </button>
+          )}
           {configured && (
             <Button variant="outline" onClick={handleClear} disabled={update.isPending}
               className="text-red-500 hover:text-red-600 border-red-200 hover:border-red-300">
@@ -344,6 +474,13 @@ function PrinterSection({ type, label, description, defaultConnection }: {
           )}
         </div>
       </div>
+
+      {showPicker && (
+        <PrinterPickerModal
+          onSelect={(p) => { setName(p); mark() }}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
     </HardwareCard>
   )
 }

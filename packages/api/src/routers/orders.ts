@@ -569,6 +569,30 @@ export const ordersRouter = router({
 
       return { id: order.id, order_number: order.order_number }
     }),
+
+  // ── Sales report ────────────────────────────────────────────────────────────
+  salesReport: tenantProcedure
+    .input(z.object({
+      date_from: z.string().optional(),  // YYYY-MM-DD
+      date_to:   z.string().optional(),  // YYYY-MM-DD inclusive
+      limit:     z.number().int().default(1000),
+    }))
+    .query(async ({ ctx, input }) => {
+      let q = ctx.supabase
+        .from('orders')
+        .select('id, order_number, created_at, status, payment_status, total_amount, paid_amount, customer_name, customer:customers(first_name, last_name)')
+        .eq('tenant_id', ctx.tenantId)
+        .not('status', 'in', '(cancelled)')
+        .order('created_at', { ascending: false })
+        .limit(input.limit)
+
+      if (input.date_from) q = q.gte('created_at', `${input.date_from}T00:00:00`)
+      if (input.date_to)   q = q.lte('created_at', `${input.date_to}T23:59:59`)
+
+      const { data, error } = await q
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return data ?? []
+    }),
 })
 
 // ─── Auto-charge helper (fire-and-forget) ────────────────────────────────────

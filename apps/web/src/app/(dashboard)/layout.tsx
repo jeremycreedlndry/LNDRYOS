@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/layout/Sidebar'
 import { TopBar } from '@/components/layout/TopBar'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { ClockInGate } from '@/components/layout/ClockInGate'
+import { EnsureTenantCookie } from '@/components/layout/EnsureTenantCookie'
 import { NayaxTapListener } from '@/components/nayax/NayaxTapListener'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -52,6 +53,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </main>
       </div>
       <MobileNav />
+      <EnsureTenantCookie tenantId={member.tenant_id} />
       <NayaxTapListener userId={user.id} tenantId={member.tenant_id} />
       <ClockInGate role={role} displayName={displayName} />
     </div>

@@ -37,12 +37,20 @@ export async function qzConnect(): Promise<void> {
 
   // Unsigned mode: QZ Tray shows a one-time trust prompt.
   // Click "Allow Always" — never asked again on this machine.
-  q.security.setCertificatePromise((_resolve: () => void, reject: () => void) => reject())
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  q.security.setCertificatePromise((resolve: any) => resolve())
   q.security.setSignatureAlgorithm('SHA512')
-  q.security.setSignaturePromise(() => (_resolve: () => void, reject: () => void) => reject())
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  q.security.setSignaturePromise(() => (resolve: any) => resolve())
 
   try {
-    await q.websocket.connect({ host: 'localhost', port: 8182, retries: 2, delay: 0.5 })
+    await q.websocket.connect({
+      host: ['localhost'],
+      port: { secure: [8181, 8183], insecure: [8080, 8182] },
+      keepAlive: 60,
+      retries: 2,
+      delay: 0.5,
+    })
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e)
     if (msg.includes('Unable to establish') || msg.includes('refused') || msg.includes('ECONNREFUSED')) {

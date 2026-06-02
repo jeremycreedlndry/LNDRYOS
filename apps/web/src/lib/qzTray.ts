@@ -37,11 +37,23 @@ export async function qzConnect(): Promise<void> {
 
   // Unsigned mode: QZ Tray shows a one-time trust prompt.
   // Click "Allow Always" — never asked again on this machine.
+  // Certificate-based trust — QZ Tray auto-allows when cert+signature match
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  q.security.setCertificatePromise((resolve: any) => resolve())
+  q.security.setCertificatePromise((resolve: any) => {
+    fetch('/api/qz-cert').then(r => r.text()).then(resolve).catch(resolve)
+  })
   q.security.setSignatureAlgorithm('SHA512')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  q.security.setSignaturePromise(() => (resolve: any) => resolve())
+  q.security.setSignaturePromise((toSign: string) => (resolve: any, reject: any) => {
+    fetch('/api/qz-sign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request: toSign }),
+    })
+      .then(r => r.json())
+      .then(j => { if (j.signature) resolve(j.signature); else reject(new Error(j.error)) })
+      .catch(reject)
+  })
 
   try {
     await q.websocket.connect({

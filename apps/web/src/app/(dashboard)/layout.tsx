@@ -33,10 +33,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (tenantIdFromCookie) {
     query = query.eq('tenant_id', tenantIdFromCookie)
   } else {
-    query = query.order('created_at', { ascending: true })  // oldest = primary tenant
+    query = query.order('created_at', { ascending: false })  // newest owner = primary tenant
   }
 
-  const { data: member } = await query.limit(1).maybeSingle()
+  const { data: members } = await query
+  // Prefer owner role, then newest membership
+  const member = members?.find((m: { role: string }) => m.role === 'owner') ?? members?.[0] ?? null
 
   if (!member) redirect('/onboarding')
 

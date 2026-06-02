@@ -22,14 +22,17 @@ export default function LoginPage() {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
 
-      // Look up the user's primary (oldest) tenant and set cookie for tRPC context
-      const { data: member } = await supabase
+      // Pick the tenant where the user is owner with the most recent creation date
+      // (skips test/onboarding tenants created earlier)
+      const { data: members } = await supabase
         .from('tenant_members')
-        .select('tenant_id')
+        .select('tenant_id, role, created_at')
         .eq('user_id', data.user.id)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle()
+        .order('created_at', { ascending: false })
+
+      // Prefer owner role, then fall back to any membership — take the newest
+      const ownerMember = members?.find((m) => m.role === 'owner')
+      const member = ownerMember ?? members?.[0] ?? null
 
       if (member?.tenant_id) {
         document.cookie = `tenant_id=${member.tenant_id}; path=/; max-age=31536000`

@@ -132,6 +132,43 @@ function buildBagLabelZPL(data: BagLabelData): string {
   ].join('\n')
 }
 
+// ─── HTML Label Preview (browser mockup of the ZPL label) ────────────────────
+
+export function buildLabelPreviewHTML(size: LabelSize = DEFAULT_LABEL_SIZE, isReady = false): string {
+  const w = Math.round(size.width_in * 96)   // px at 96dpi
+  const h = Math.round(size.height_in * 96)
+
+  const orderNum = '1234'
+  const customer = 'John Smith'
+  const bag = isReady ? 'READY FOR PICKUP' : 'BAG 1 OF 2'
+  const date = new Date().toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
+  const store = 'THE LNDRY CO.'
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{width:${w}px;height:${h}px;overflow:hidden;font-family:monospace;
+         display:flex;flex-direction:column;align-items:center;justify-content:space-around;
+         padding:8px;background:white;border:1px solid #ccc}
+    .store{font-size:${size.height_in <= 2 ? 10 : 13}px;font-weight:bold;letter-spacing:1px}
+    .hr{width:100%;border-top:2px solid #000;margin:2px 0}
+    .customer{font-size:${size.height_in <= 2 ? 14 : 20}px;font-weight:bold;text-align:center}
+    .order{font-size:${size.height_in <= 2 ? 11 : 15}px;text-align:center}
+    .bag{font-size:${size.height_in <= 2 ? 13 : 18}px;font-weight:bold;text-align:center;
+         ${isReady ? 'color:#16a34a' : ''}}
+    .date{font-size:10px;text-align:center;color:#555}
+    .barcode{font-size:9px;letter-spacing:3px;font-family:monospace;text-align:center;margin-top:2px}
+  </style></head><body>
+    <div class="store">${store}</div>
+    <div class="hr"></div>
+    <div class="customer">${customer}</div>
+    <div class="order">#${orderNum}</div>
+    <div class="hr"></div>
+    <div class="bag">${bag}</div>
+    <div class="date">${date}</div>
+    ${size.height_in >= 3 ? `<div class="barcode">||||| ${orderNum} |||||</div>` : ''}
+  </body></html>`
+}
+
 // ─── ESC/POS + Star commands ──────────────────────────────────────────────────
 
 const ESC = '\x1B'

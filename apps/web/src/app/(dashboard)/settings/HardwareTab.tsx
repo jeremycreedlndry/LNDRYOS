@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { qzListPrinters, qzPrintZPL, qzPrintRaw, qzPrintHTML } from '@/lib/qzTray'
-import { LABEL_SIZE_PRESETS, DEFAULT_LABEL_SIZE, type LabelSize, buildReceiptHTML } from '@/lib/printJobs'
+import { LABEL_SIZE_PRESETS, DEFAULT_LABEL_SIZE, type LabelSize, buildReceiptHTML, buildLabelPreviewHTML } from '@/lib/printJobs'
 import toast from 'react-hot-toast'
 
 // ─── Printer picker modal ─────────────────────────────────────────────────────
@@ -500,15 +500,13 @@ function PrinterSection({ type, label, description, defaultConnection }: {
               {testing ? 'Printing…' : 'Test Print'}
             </button>
           )}
-          {type === 'receipt' && (
-            <button
-              type="button"
-              onClick={() => setShowPreview(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-            >
-              Preview Receipt
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setShowPreview(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Preview
+          </button>
           {configured && (
             <Button variant="outline" onClick={handleClear} disabled={update.isPending}
               className="text-red-500 hover:text-red-600 border-red-200 hover:border-red-300">
@@ -529,12 +527,20 @@ function PrinterSection({ type, label, description, defaultConnection }: {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4 shrink-0">
-              <h2 className="text-base font-semibold text-gray-900">Receipt Preview</h2>
+              <h2 className="text-base font-semibold text-gray-900">{type === 'label' ? 'Label Preview' : 'Receipt Preview'}</h2>
               <button onClick={() => setShowPreview(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="h-5 w-5" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
+              {type === 'label' ? (
+                <div className="flex flex-col gap-4 items-center">
+                  <p className="text-xs text-gray-500">Bag-in label (drop-off)</p>
+                  <div dangerouslySetInnerHTML={{ __html: buildLabelPreviewHTML(LABEL_SIZE_PRESETS[labelSize] ?? DEFAULT_LABEL_SIZE, false) }} />
+                  <p className="text-xs text-gray-500 mt-2">Bag-out label (ready)</p>
+                  <div dangerouslySetInnerHTML={{ __html: buildLabelPreviewHTML(LABEL_SIZE_PRESETS[labelSize] ?? DEFAULT_LABEL_SIZE, true) }} />
+                </div>
+              ) : (
               <div
                 className="border border-gray-200 rounded bg-white mx-auto"
                 style={{ width: 220, fontSize: 13 }}
@@ -565,6 +571,7 @@ function PrinterSection({ type, label, description, defaultConnection }: {
                   }, 'Customer Copy'),
                 }}
               />
+              )}
             </div>
           </div>
         </div>

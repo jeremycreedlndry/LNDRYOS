@@ -6,7 +6,7 @@ import { trpc } from '@/lib/trpc'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { qzListPrinters, qzPrintZPL, qzPrintRaw } from '@/lib/qzTray'
+import { qzListPrinters, qzPrintZPL, qzPrintRaw, qzPrintHTML } from '@/lib/qzTray'
 import { LABEL_SIZE_PRESETS, DEFAULT_LABEL_SIZE, type LabelSize } from '@/lib/printJobs'
 import toast from 'react-hot-toast'
 
@@ -309,22 +309,21 @@ function PrinterSection({ type, label, description, defaultConnection }: {
         ].join('\n')
         await qzPrintZPL(printerName, zpl)
       } else {
-        // ESC/POS test for receipt printer (Star MCP20BK / mC-Print2)
-        const ESC = '\x1B', GS = '\x1D'
-        const data = [
-          ESC + '@',              // init / reset
-          ESC + 'a\x01',         // center align
-          ESC + '!\x18',         // double height+width
-          'LNDRYOS\n',
-          ESC + '!\x00',         // normal
-          'Receipt Printer OK\n',
-          new Date().toLocaleString() + '\n',
-          ESC + '@',              // reset again before cut
-          ESC + '\x64\x06',       // ESC d 6 — Star: feed 6 lines
-          ESC + 'i',              // ESC i   — Star: full cut
-          GS  + 'V\x00',         // GS V 0  — ESC/POS full cut (fallback)
-        ].join('')
-        await qzPrintRaw(printerName, data)
+        // HTML test — creates GDI job so Windows driver auto-cuts
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+          <style>body{font-family:monospace;font-size:12px;text-align:center}</style>
+          </head><body>
+          <div style="font-size:20px;font-weight:bold">LNDRYOS</div>
+          <div>Receipt Printer OK</div>
+          <div>${new Date().toLocaleString()}</div>
+          </body></html>`
+        const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/
+        if (IP_RE.test(printerName)) {
+          const ESC = '\x1B', GS = '\x1D'
+          await qzPrintRaw(printerName, [ESC+'@','LNDRYOS\n','Receipt Printer OK\n',new Date().toLocaleString()+'\n','\n\n\n',ESC+'\x64\x06',ESC+'i',GS+'V\x00'].join(''))
+        } else {
+          await qzPrintHTML(printerName, html)
+        }
       }
       toast.success('Test print sent!')
     } catch (e: unknown) {

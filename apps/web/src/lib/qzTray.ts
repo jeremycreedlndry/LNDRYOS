@@ -121,13 +121,27 @@ export async function qzPrintRaw(printerName: string, data: string): Promise<voi
   await qzConnect()
   const q = await getQZ()
   const config = makeConfig(q, printerName)
-  // Use plain for Windows named printers (driver handles encoding),
-  // base64 for direct IP socket connections (raw bytes needed)
   if (IP_RE.test(printerName.trim())) {
+    // Direct socket — base64 preserves raw bytes
     await q.print(config, [{ type: 'raw', format: 'base64', data: toBase64(data) }])
   } else {
     await q.print(config, [{ type: 'raw', format: 'plain', data }])
   }
+}
+
+/** Print an HTML receipt via QZ Tray — creates a proper GDI job so the Windows driver
+ *  auto-cut setting (Document Bottom: Full Cut) fires correctly. */
+export async function qzPrintHTML(printerName: string, html: string, sizeMm = 80): Promise<void> {
+  await qzConnect()
+  const q = await getQZ()
+  const config = q.configs.create(printerName, {
+    size: { width: sizeMm, height: null }, // null height = continuous
+    units: 'mm',
+    margins: 0,
+    orientation: 'portrait',
+    colorType: 'grayscale',
+  })
+  await q.print(config, [{ type: 'html', format: 'plain', data: html }])
 }
 
 /** Returns true if QZ Tray is reachable. */

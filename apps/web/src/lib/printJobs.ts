@@ -2,7 +2,7 @@
  * Print job templates for bag labels (ZPL) and receipts (ESC/POS).
  */
 
-import { qzPrintZPL, qzPrintRaw } from './qzTray'
+import { qzPrintZPL, qzPrintRaw, qzPrintHTML } from './qzTray'
 import { formatCurrency } from './utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -266,6 +266,59 @@ function buildReceiptESCPOS(data: ReceiptData): string {
   return buildOneCopy(data, 'Customer Copy') + buildOneCopy(data, 'Store Copy')
 }
 
+// ─── HTML Receipt (for Windows GDI printers — triggers driver auto-cut) ──────
+
+function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
+  const notes = parseNotes(data.lines)
+  const droppedOff = data.droppedOffDate
+    ?? new Date().toLocaleDateString('en-CA', { month: '2-digit', day: '2-digit', year: '2-digit' })
+
+  const totalLbs = data.lines.filter(l => l.unitLabel === 'lb').reduce((s, l) => s + l.quantity, 0)
+  const pieces   = data.lines.filter(l => l.unitLabel !== 'lb').reduce((s, l) => s + l.quantity, 0)
+  const piecesLine = totalLbs > 0 ? `${totalLbs.toFixed(1)} lbs` : `${pieces} Piece${pieces !== 1 ? 's' : ''}`
+
+  const lineRows = data.lines.map(l => {
+    const qty = l.unitLabel === 'lb' ? `${l.quantity.toFixed(1)} lb` : `×${l.quantity}`
+    return `<tr><td>${l.name} ${qty}</td><td style="text-align:right">${formatCurrency(Math.round(l.quantity * l.unitPrice))}</td></tr>`
+  }).join('')
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:monospace;font-size:11px;width:100%}
+    .c{text-align:center} .r{text-align:right} .b{font-weight:bold} .lg{font-size:16px}
+    .xl{font-size:20px;font-weight:bold} hr{border:none;border-top:1px dashed #000;margin:4px 0}
+    table{width:100%;border-collapse:collapse} td{padding:1px 2px}
+    .pad{padding:6px 0}
+  </style></head><body>
+    <div class="c">${copyLabel}</div>
+    <div class="c b">#${data.orderNumber}</div>
+    <div class="c">${piecesLine}</div>
+    <div class="pad"></div>
+    <div class="c xl">${data.storeName ?? 'The Laundry Co.'}</div>
+    ${data.storeAddress ? `<div class="c">${data.storeAddress}</div>` : ''}
+    ${data.storeCityPostal ? `<div class="c">${data.storeCityPostal}</div>` : ''}
+    ${data.storePhone ? `<div class="c">Tel: ${data.storePhone}</div>` : ''}
+    ${data.staffName ? `<div class="c">Served By: ${data.staffName}</div>` : ''}
+    <div class="pad"></div>
+    <div class="c xl">${data.customerName || 'Walk-in'}</div>
+    ${data.customerPhone ? `<div class="c">${data.customerPhone}</div>` : ''}
+    <hr/>
+    <table>${lineRows}</table>
+    <hr/>
+    <table>
+      <tr><td>SUBTOTAL:</td><td class="r">${formatCurrency(data.subtotalCents)}</td></tr>
+      ${data.taxCents > 0 ? `<tr><td>TAX:</td><td class="r">${formatCurrency(data.taxCents)}</td></tr>` : ''}
+      <tr class="b"><td>TOTAL:</td><td class="r">${formatCurrency(data.totalCents)}</td></tr>
+    </table>
+    <div class="c">${data.paymentMethod}</div>
+    <hr/>
+    ${notes.length > 0 ? `<div>Notes: ${notes.join('<br>')}</div>` : ''}
+    <div>Dropped Off: ${droppedOff}</div>
+    ${data.readyDate ? `<div class="c xl pad">Ready: ${data.readyDate}</div>` : ''}
+    <div class="c pad">Thank you for your business!</div>
+  </body></html>`
+}
+
 // ─── Public print functions ───────────────────────────────────────────────────
 
 /**
@@ -379,6 +432,13 @@ export async function printReceipt(
     readyDate,
   }
 
-  // buildReceiptESCPOS includes both Customer Copy + Store Copy + cut between them
-  await qzPrintRaw(printerName, buildReceiptESCPOS(data))
+  const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/
+  if (IP_RE.test(printerName.trim())) {
+    // Direct IP socket — use raw ESC/POS (cut in data)
+    await qzPrintRaw(printerName, buildReceiptESCPOS(data))
+  } else {
+    // Windows named printer — HTML creates GDI job so driver auto-cuts (Document Bottom: Full Cut)
+    await qzPrintHTML(printerName, buildReceiptHTML(data, 'Customer Copy'))
+    await qzPrintHTML(printerName, buildReceiptHTML(data, 'Store Copy'))
+  }
 }

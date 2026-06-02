@@ -86,23 +86,41 @@ export async function qzListPrinters(): Promise<string[]> {
   return (Array.isArray(result) ? result : [result]).filter(Boolean).sort()
 }
 
-/** Send raw ZPL to a printer by name. */
+const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/
+
+/** Build a QZ Tray config — uses direct socket for IP addresses, Windows driver for named printers. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeConfig(q: any, printerName: string, port = 9100) {
+  if (IP_RE.test(printerName.trim())) {
+    // Direct raw socket — bypasses Windows driver, cut commands work
+    return q.configs.create({ host: printerName.trim(), port, retries: 2, waitTime: 5000 })
+  }
+  return q.configs.create(printerName)
+}
+
+/** Convert string to base64 without spreading large arrays (avoids call stack overflow). */
+function toBase64(data: string): string {
+  const bytes = new Uint8Array(data.length)
+  for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
+}
+
+/** Send raw ZPL to a printer by name or IP. */
 export async function qzPrintZPL(printerName: string, zpl: string): Promise<void> {
   await qzConnect()
   const q = await getQZ()
-  const config = q.configs.create(printerName)
+  const config = makeConfig(q, printerName)
   await q.print(config, [{ type: 'raw', format: 'command', data: zpl }])
 }
 
-/** Send raw ESC/POS to a printer — encodes as base64 so binary bytes aren't corrupted. */
+/** Send raw ESC/POS to a printer by name or IP — base64 encoded so bytes aren't corrupted. */
 export async function qzPrintRaw(printerName: string, data: string): Promise<void> {
   await qzConnect()
   const q = await getQZ()
-  const config = q.configs.create(printerName)
-  // Convert to base64 so QZ Tray sends exact bytes (plain/UTF-8 corrupts ESC/POS binary)
-  const bytes = new Uint8Array(data.split('').map(c => c.charCodeAt(0) & 0xff))
-  const b64 = btoa(String.fromCharCode(...bytes))
-  await q.print(config, [{ type: 'raw', format: 'base64', data: b64 }])
+  const config = makeConfig(q, printerName)
+  await q.print(config, [{ type: 'raw', format: 'base64', data: toBase64(data) }])
 }
 
 /** Returns true if QZ Tray is reachable. */

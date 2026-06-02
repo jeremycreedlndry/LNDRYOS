@@ -94,12 +94,15 @@ export async function qzPrintZPL(printerName: string, zpl: string): Promise<void
   await q.print(config, [{ type: 'raw', format: 'command', data: zpl }])
 }
 
-/** Send raw ESC/POS (or plain text) to a printer by name. */
+/** Send raw ESC/POS to a printer — encodes as base64 so binary bytes aren't corrupted. */
 export async function qzPrintRaw(printerName: string, data: string): Promise<void> {
   await qzConnect()
   const q = await getQZ()
   const config = q.configs.create(printerName)
-  await q.print(config, [{ type: 'raw', format: 'plain', data }])
+  // Convert to base64 so QZ Tray sends exact bytes (plain/UTF-8 corrupts ESC/POS binary)
+  const bytes = new Uint8Array(data.split('').map(c => c.charCodeAt(0) & 0xff))
+  const b64 = btoa(String.fromCharCode(...bytes))
+  await q.print(config, [{ type: 'raw', format: 'base64', data: b64 }])
 }
 
 /** Returns true if QZ Tray is reachable. */

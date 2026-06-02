@@ -309,24 +309,20 @@ function PrinterSection({ type, label, description, defaultConnection }: {
         ].join('\n')
         await qzPrintZPL(printerName, zpl)
       } else {
-        // ESC/POS test for receipt printer — try all Star/ESC-POS cut variants
+        // ESC/POS test for receipt printer (Star MCP20BK / mC-Print2)
         const ESC = '\x1B', GS = '\x1D'
         const data = [
-          ESC + '@',            // init
-          ESC + 'a\x01',       // center align
-          ESC + '!\x18',       // double height+width
+          ESC + '@',              // init / reset
+          ESC + 'a\x01',         // center align
+          ESC + '!\x18',         // double height+width
           'LNDRYOS\n',
-          ESC + '!\x00',       // normal
+          ESC + '!\x00',         // normal
           'Receipt Printer OK\n',
           new Date().toLocaleString() + '\n',
-          '\n\n\n\n\n',        // feed past cutter
-          // All cut variants — printer uses whichever it knows
-          GS + 'V\x00',        // GS V 0  — ESC/POS full cut
-          GS + 'V\x01',        // GS V 1  — ESC/POS partial cut
-          GS + 'V\x41\x00',    // GS V A 0 — ESC/POS cut+feed
-          ESC + 'i',           // ESC i   — Star full cut
-          ESC + 'm',           // ESC m   — Star partial cut
-          ESC + '\x0c',        // ESC FF  — form feed / cut
+          ESC + '@',              // reset again before cut
+          ESC + '\x64\x06',       // ESC d 6 — Star: feed 6 lines
+          ESC + 'i',              // ESC i   — Star: full cut
+          GS  + 'V\x00',         // GS V 0  — ESC/POS full cut (fallback)
         ].join('')
         await qzPrintRaw(printerName, data)
       }

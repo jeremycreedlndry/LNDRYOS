@@ -2,14 +2,12 @@
  * QZ Tray bridge — connects to the local QZ Tray agent (ws://localhost:8182)
  * and exposes printer discovery + raw print helpers.
  *
- * Uses certificate-based signing so QZ Tray trusts any browser/device
- * without per-machine prompts or Chrome mixed-content workarounds.
+ * Uses unsigned mode — QZ Tray shows a one-time "Allow this app?" prompt.
+ * Click "Allow Always" once and it never asks again.
  *
  * QZ Tray must be running on the client machine.
  * https://qz.io
  */
-
-import { QZ_CERT } from './qz-cert'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let qz: any = null
@@ -27,35 +25,20 @@ export async function qzConnect(): Promise<void> {
   const q = await getQZ()
   if (q.websocket.isActive()) return
 
-  // Certificate-based trust: server signs each request with our private key.
-  // QZ Tray verifies the signature against the embedded certificate — no
-  // per-machine trust prompt needed.
-  q.security.setCertificatePromise((resolve: (v: string) => void) => {
-    resolve(QZ_CERT)
-  })
+  // Unsigned mode: QZ Tray will show a one-time trust prompt.
+  // Click "Allow Always" — never asked again on this machine.
+  q.security.setCertificatePromise((resolve: (v: string) => void) => resolve(''))
   q.security.setSignatureAlgorithm('SHA512')
-  q.security.setSignaturePromise((toSign: string) => (resolve: (v: string) => void, reject: (e: unknown) => void) => {
-    fetch('/api/qz-sign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request: toSign }),
-    })
-      .then((res) => res.json())
-      .then((json) => {
-        if (!json.signature) throw new Error(json.error ?? 'Signing failed')
-        resolve(json.signature)
-      })
-      .catch(reject)
-  })
+  q.security.setSignaturePromise(() => (resolve: (v: string) => void) => resolve(''))
 
   try {
     await q.websocket.connect({ host: 'localhost', port: 8182, retries: 2, delay: 0.5 })
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e)
-    if (msg.includes('Unable to establish') || msg.includes('refused')) {
+    if (msg.includes('Unable to establish') || msg.includes('refused') || msg.includes('ECONNREFUSED')) {
       throw new Error('QZ Tray is not running. Open QZ Tray on this machine and try again.')
     }
-    throw e
+    throw new Error(`QZ Tray connection failed: ${msg}`)
   }
 }
 

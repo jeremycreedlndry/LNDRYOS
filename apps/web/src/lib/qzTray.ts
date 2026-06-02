@@ -95,7 +95,8 @@ function makeConfig(q: any, printerName: string, port = 9100) {
     // Direct raw socket — bypasses Windows driver, cut commands work
     return q.configs.create({ host: printerName.trim(), port, retries: 2, waitTime: 5000 })
   }
-  return q.configs.create(printerName)
+  // Cp1252 encoding ensures ESC/POS binary bytes are sent as single bytes (not UTF-8 mangled)
+  return q.configs.create(printerName, { encoding: 'Cp1252' })
 }
 
 /** Convert string to base64 without spreading large arrays (avoids call stack overflow). */

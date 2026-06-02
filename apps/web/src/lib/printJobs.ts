@@ -323,19 +323,35 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
   const pieces   = data.lines.filter(l => l.unitLabel !== 'lb').reduce((s, l) => s + l.quantity, 0)
   const piecesLine = totalLbs > 0 ? `${totalLbs.toFixed(1)} lbs` : `${pieces} Piece${pieces !== 1 ? 's' : ''}`
 
-  // Line items — show name, qty/weight, price. Wash & fold shows weight on second line like CleanCloud
-  const lineRows = data.lines.map(l => {
+  // Strip "· Bag N" suffix from names and group same-service bags into one line
+  const cleanName = (n: string) => n.replace(/\s*·\s*Bag\s+\d+\s*(of\s+\d+)?/i, '').trim()
+
+  type GroupedLine = { name: string; quantity: number; unitPrice: number; unitLabel: string; bags: number }
+  const grouped = data.lines.reduce<GroupedLine[]>((acc, l) => {
+    const name = cleanName(l.name)
+    const existing = acc.find(g => g.name === name && g.unitLabel === l.unitLabel && g.unitPrice === l.unitPrice)
+    if (existing) {
+      existing.quantity += l.quantity
+      existing.bags += 1
+    } else {
+      acc.push({ name, quantity: l.quantity, unitPrice: l.unitPrice, unitLabel: l.unitLabel, bags: 1 })
+    }
+    return acc
+  }, [])
+
+  const lineRows = grouped.map(l => {
     const isLb = l.unitLabel === 'lb'
     const price = formatCurrency(Math.round(l.quantity * l.unitPrice))
+    const bagNote = l.bags > 1 ? ` (${l.bags} bags)` : ''
     if (isLb) {
       return `
         <tr>
-          <td>${l.name} x ${l.quantity.toFixed(1)}</td>
+          <td>${l.name}${bagNote} x ${l.quantity.toFixed(1)}</td>
           <td style="text-align:right">${price}</td>
         </tr>
         <tr><td style="padding-left:8px;color:#555">${l.quantity.toFixed(2)}lb</td><td></td></tr>`
     }
-    return `<tr><td>${l.name} ×${l.quantity}</td><td style="text-align:right">${price}</td></tr>`
+    return `<tr><td>${l.name}${bagNote} ×${l.quantity}</td><td style="text-align:right">${price}</td></tr>`
   }).join('')
 
   const balanceDue = data.totalCents - (data.paidCents ?? 0)

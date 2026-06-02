@@ -315,7 +315,7 @@ function PrinterSection({ type, label, description, defaultConnection }: {
           </head><body>
           <div style="font-size:20px;font-weight:bold">LNDRYOS</div>
           <div>Receipt Printer OK</div>
-          <div style="font-size:16px;font-weight:bold">TEST ME BITCH</div>
+          <div style="font-size:16px;font-weight:bold">TEST ME BITCH 1</div>
           <div>${new Date().toLocaleString()}</div>
           </body></html>`
         const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/

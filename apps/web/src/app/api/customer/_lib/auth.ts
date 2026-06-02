@@ -19,6 +19,19 @@ export function getServiceClient() {
   )
 }
 
+// Separate client used only to verify customer app JWTs.
+// The customer app has its own Supabase project (lndryos-customer-app) for auth,
+// decoupled from the platform's data project. Tokens are issued by that project
+// so must be verified against it.
+function getCustomerAuthClient() {
+  const url = process.env.CUSTOMER_SUPABASE_URL
+  const key = process.env.CUSTOMER_SUPABASE_SERVICE_ROLE_KEY
+  // Fall back to the platform project if the customer app vars aren't set
+  // (e.g. during transition or in environments not yet updated)
+  if (!url || !key) return getServiceClient()
+  return createClient(url, key, { auth: { persistSession: false } })
+}
+
 // Resolve tenant_id from X-Tenant-Token header.
 // Falls back to the hardcoded constant so existing callers keep working.
 export async function resolveTenantId(req: NextRequest): Promise<string | null> {
@@ -49,13 +62,13 @@ export async function requireCustomer(req: NextRequest): Promise<
 > {
   const supabase = getServiceClient()
 
-  // Validate customer JWT
+  // Validate customer JWT against the customer app's own Supabase project
   const token = req.headers.get('authorization')?.replace('Bearer ', '').trim()
   if (!token) {
     return { ctx: null, response: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS_HEADERS }) }
   }
 
-  const { data: { user }, error } = await supabase.auth.getUser(token)
+  const { data: { user }, error } = await getCustomerAuthClient().auth.getUser(token)
   if (error || !user) {
     return { ctx: null, response: new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: CORS_HEADERS }) }
   }

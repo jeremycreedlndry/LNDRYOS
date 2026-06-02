@@ -52,10 +52,12 @@ export interface ReceiptData {
   taxCents: number
   totalCents: number
   paymentMethod: string
+  paidCents?: number
   storeName?: string
   storeAddress?: string | null
   storeCityPostal?: string | null
   storePhone?: string | null
+  taxName?: string | null
   staffName?: string | null
   droppedOffDate?: string | null
   readyDate?: string | null
@@ -156,7 +158,7 @@ function padLine(left: string, right: string, width = W): string {
 
 const DASH = '-'.repeat(W) + '\n'
 
-// Parse notes stored as "Key: Val · Key: Val" into individual lines
+// Parse notes stored as "Key: Val · Key: Val" — filters out undefined/empty values
 function parseNotes(lines: ReceiptLine[]): string[] {
   const raw = lines
     .map((l) => l.notes)
@@ -164,7 +166,13 @@ function parseNotes(lines: ReceiptLine[]): string[] {
     .filter((v, i, a) => a.indexOf(v) === i)
     .join(' · ')
   if (!raw) return []
-  return raw.split(' · ').map((s) => s.trim()).filter(Boolean)
+  return raw.split(' · ')
+    .map((s) => s.trim())
+    .filter((s) => {
+      if (!s) return false
+      const val = s.split(':').slice(1).join(':').trim()
+      return val && val !== 'undefined' && val !== 'null' && val !== ''
+    })
 }
 
 function buildOneCopy(data: ReceiptData, copyLabel: string): string {
@@ -268,54 +276,76 @@ function buildReceiptESCPOS(data: ReceiptData): string {
 
 // ─── HTML Receipt (for Windows GDI printers — triggers driver auto-cut) ──────
 
-function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
+export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
   const notes = parseNotes(data.lines)
+
   const droppedOff = data.droppedOffDate
-    ?? new Date().toLocaleDateString('en-CA', { month: '2-digit', day: '2-digit', year: '2-digit' })
+    ?? new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })
 
   const totalLbs = data.lines.filter(l => l.unitLabel === 'lb').reduce((s, l) => s + l.quantity, 0)
   const pieces   = data.lines.filter(l => l.unitLabel !== 'lb').reduce((s, l) => s + l.quantity, 0)
   const piecesLine = totalLbs > 0 ? `${totalLbs.toFixed(1)} lbs` : `${pieces} Piece${pieces !== 1 ? 's' : ''}`
 
+  // Line items — show name, qty/weight, price. Wash & fold shows weight on second line like CleanCloud
   const lineRows = data.lines.map(l => {
-    const qty = l.unitLabel === 'lb' ? `${l.quantity.toFixed(1)} lb` : `×${l.quantity}`
-    return `<tr><td>${l.name} ${qty}</td><td style="text-align:right">${formatCurrency(Math.round(l.quantity * l.unitPrice))}</td></tr>`
+    const isLb = l.unitLabel === 'lb'
+    const price = formatCurrency(Math.round(l.quantity * l.unitPrice))
+    if (isLb) {
+      return `
+        <tr>
+          <td>${l.name} x ${l.quantity.toFixed(1)}</td>
+          <td style="text-align:right">${price}</td>
+        </tr>
+        <tr><td style="padding-left:8px;color:#555">${l.quantity.toFixed(2)}lb</td><td></td></tr>`
+    }
+    return `<tr><td>${l.name} ×${l.quantity}</td><td style="text-align:right">${price}</td></tr>`
   }).join('')
+
+  const balanceDue = data.totalCents - (data.paidCents ?? 0)
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:monospace;font-size:11px;width:100%}
-    .c{text-align:center} .r{text-align:right} .b{font-weight:bold} .lg{font-size:16px}
-    .xl{font-size:20px;font-weight:bold} hr{border:none;border-top:1px dashed #000;margin:4px 0}
-    table{width:100%;border-collapse:collapse} td{padding:1px 2px}
-    .pad{padding:6px 0}
+    body{font-family:'Courier New',monospace;font-size:13px;width:100%;padding:2px 4px}
+    .c{text-align:center} .r{text-align:right} .b{font-weight:bold}
+    .store{font-size:18px;font-weight:bold;text-align:center;margin:4px 0}
+    .customer{font-size:17px;font-weight:bold;text-align:center;margin:6px 0 2px}
+    .ready{font-size:20px;font-weight:bold;text-align:center;margin:8px 0}
+    .sm{font-size:11px} .label{font-size:11px;text-align:center}
+    hr{border:none;border-top:1px dashed #000;margin:5px 0}
+    table{width:100%;border-collapse:collapse} td{padding:1px 2px;vertical-align:top}
+    .gap{height:6px}
   </style></head><body>
-    <div class="c">${copyLabel}</div>
+    <div class="c sm">*** ${copyLabel} ***</div>
     <div class="c b">#${data.orderNumber}</div>
     <div class="c">${piecesLine}</div>
-    <div class="pad"></div>
-    <div class="c xl">${data.storeName ?? 'The Laundry Co.'}</div>
-    ${data.storeAddress ? `<div class="c">${data.storeAddress}</div>` : ''}
-    ${data.storeCityPostal ? `<div class="c">${data.storeCityPostal}</div>` : ''}
-    ${data.storePhone ? `<div class="c">Tel: ${data.storePhone}</div>` : ''}
-    ${data.staffName ? `<div class="c">Served By: ${data.staffName}</div>` : ''}
-    <div class="pad"></div>
-    <div class="c xl">${data.customerName || 'Walk-in'}</div>
-    ${data.customerPhone ? `<div class="c">${data.customerPhone}</div>` : ''}
+    <div class="gap"></div>
+    <div class="store">${data.storeName ?? 'The Laundry Co.'}</div>
+    ${data.storeAddress ? `<div class="c sm">${data.storeAddress}</div>` : ''}
+    ${data.storeCityPostal ? `<div class="c sm">${data.storeCityPostal}</div>` : ''}
+    ${data.storePhone ? `<div class="c sm">Tel: ${data.storePhone}</div>` : ''}
+    ${data.staffName ? `<div class="c sm">Served By: ${data.staffName}</div>` : ''}
+    <div class="gap"></div>
+    <div class="customer">${data.customerName || 'Walk-in'}</div>
+    ${data.customerPhone ? `<div class="c sm">${data.customerPhone}</div>` : ''}
     <hr/>
     <table>${lineRows}</table>
     <hr/>
     <table>
       <tr><td>SUBTOTAL:</td><td class="r">${formatCurrency(data.subtotalCents)}</td></tr>
-      ${data.taxCents > 0 ? `<tr><td>TAX:</td><td class="r">${formatCurrency(data.taxCents)}</td></tr>` : ''}
+      ${data.taxCents > 0 ? `<tr><td>${data.taxName ?? 'TAX'}:</td><td class="r">${formatCurrency(data.taxCents)}</td></tr>` : ''}
       <tr class="b"><td>TOTAL:</td><td class="r">${formatCurrency(data.totalCents)}</td></tr>
+      ${balanceDue > 0 ? `<tr class="b"><td>BALANCE DUE:</td><td class="r">${formatCurrency(balanceDue)}</td></tr>` : ''}
     </table>
-    <div class="c">${data.paymentMethod}</div>
+    <div class="c gap">${data.paymentMethod}</div>
     <hr/>
-    ${notes.length > 0 ? `<div>Notes: ${notes.join('<br>')}</div>` : ''}
-    <div>Dropped Off: ${droppedOff}</div>
-    ${data.readyDate ? `<div class="c xl pad">Ready: ${data.readyDate}</div>` : ''}
-    <div class="c pad">Thank you for your business!</div>
+    ${notes.length > 0 ? `
+      <div class="sm">Notes: ${notes[0]}</div>
+      ${notes.slice(1).map(n => `<div class="sm" style="padding-left:8px">${n}</div>`).join('')}
+      <div class="gap"></div>` : ''}
+    <div class="sm">Dropped Off: ${droppedOff}</div>
+    ${data.readyDate ? `<div class="ready">Ready: ${data.readyDate}</div>` : ''}
+    <div class="gap"></div>
+    <div class="c sm">Thank you for your business!</div>
   </body></html>`
 }
 

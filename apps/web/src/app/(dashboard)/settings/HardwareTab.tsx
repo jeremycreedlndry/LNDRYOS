@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { qzListPrinters, qzPrintZPL, qzPrintRaw, qzPrintHTML } from '@/lib/qzTray'
-import { LABEL_SIZE_PRESETS, DEFAULT_LABEL_SIZE, type LabelSize } from '@/lib/printJobs'
+import { LABEL_SIZE_PRESETS, DEFAULT_LABEL_SIZE, type LabelSize, buildReceiptHTML } from '@/lib/printJobs'
 import toast from 'react-hot-toast'
 
 // ─── Printer picker modal ─────────────────────────────────────────────────────
@@ -259,8 +259,9 @@ function PrinterSection({ type, label, description, defaultConnection }: {
   const [share,      setShare]      = useState(saved.share      ?? '')
   const [address,    setAddress]    = useState(saved.address    ?? '')
   const [dirty,      setDirty]      = useState(false)
-  const [showPicker, setShowPicker] = useState(false)
-  const [testing,    setTesting]    = useState(false)
+  const [showPicker,  setShowPicker]  = useState(false)
+  const [testing,     setTesting]     = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
 
   const configured = !!(saved.name || saved.ip || saved.host || saved.address)
 
@@ -499,6 +500,15 @@ function PrinterSection({ type, label, description, defaultConnection }: {
               {testing ? 'Printing…' : 'Test Print'}
             </button>
           )}
+          {type === 'receipt' && (
+            <button
+              type="button"
+              onClick={() => setShowPreview(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            >
+              Preview Receipt
+            </button>
+          )}
           {configured && (
             <Button variant="outline" onClick={handleClear} disabled={update.isPending}
               className="text-red-500 hover:text-red-600 border-red-200 hover:border-red-300">
@@ -513,6 +523,51 @@ function PrinterSection({ type, label, description, defaultConnection }: {
           onSelect={(p) => { setName(p); mark() }}
           onClose={() => setShowPicker(false)}
         />
+      )}
+
+      {showPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4 shrink-0">
+              <h2 className="text-base font-semibold text-gray-900">Receipt Preview</h2>
+              <button onClick={() => setShowPreview(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              <div
+                className="border border-gray-200 rounded bg-white mx-auto"
+                style={{ width: 220, fontSize: 13 }}
+                dangerouslySetInnerHTML={{
+                  __html: buildReceiptHTML({
+                    orderNumber: '1234',
+                    customerName: 'John Smith',
+                    customerPhone: '705-555-1234',
+                    lines: [
+                      { name: 'Wash & Fold', quantity: 8.5, unitPrice: 250, unitLabel: 'lb', notes: 'Dryer Sheets: Bounce · Detergent Type: Tide · Wash Temperature: Cold' },
+                    ],
+                    subtotalCents: 2125,
+                    taxCents: 276,
+                    totalCents: 2401,
+                    paidCents: 0,
+                    paymentMethod: 'Card',
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    storeName: (tenant?.settings as any)?.store_name ?? tenant?.name ?? 'The LNDRY Co.',
+                    storeAddress: (tenant?.address as Record<string,string>)?.street ?? null,
+                    storeCityPostal: (tenant?.address as Record<string,string>)?.city && (tenant?.address as Record<string,string>)?.postal_code
+                      ? `${(tenant?.address as Record<string,string>).city}, ${(tenant?.address as Record<string,string>).postal_code}`
+                      : null,
+                    storePhone: (tenantSettings?.phone as string) ?? null,
+                    taxName: (tenantSettings?.tax_name as string) ?? 'HST',
+                    staffName: 'You',
+                    droppedOffDate: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }),
+                    readyDate: new Date(Date.now() + 2 * 86400000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+                  }, 'Customer Copy'),
+                }}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </HardwareCard>
   )

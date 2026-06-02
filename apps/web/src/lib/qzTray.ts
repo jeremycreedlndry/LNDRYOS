@@ -1,6 +1,6 @@
 /**
- * QZ Tray bridge — connects to the local QZ Tray agent (ws://localhost:8182)
- * and exposes printer discovery + raw print helpers.
+ * QZ Tray bridge — loads qz-tray.js via script tag (officially supported method)
+ * and connects to the local QZ Tray agent on ws://localhost:8182.
  *
  * Uses unsigned mode — QZ Tray shows a one-time "Allow this app?" prompt.
  * Click "Allow Always" once and it never asks again.
@@ -10,28 +10,36 @@
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let qz: any = null
-
-async function getQZ() {
-  if (qz) return qz
-  const mod = await import('qz-tray')
+function getQZ(): any {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  qz = (mod as any).default ?? mod
-  return qz
+  return (window as any).qz
+}
+
+/** Load QZ Tray script from CDN if not already loaded */
+async function loadQZScript(): Promise<void> {
+  if (getQZ()) return
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script')
+    script.src = 'https://cdn.jsdelivr.net/npm/qz-tray@2.2.6/qz-tray.js'
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error('Failed to load QZ Tray script'))
+    document.head.appendChild(script)
+  })
 }
 
 /** Connect to the QZ Tray WebSocket. Safe to call multiple times. */
 export async function qzConnect(): Promise<void> {
-  const q = await getQZ()
+  await loadQZScript()
+  const q = getQZ()
+
+  if (!q) throw new Error('QZ Tray library failed to load')
   if (q.websocket.isActive()) return
 
-  // Unsigned mode: QZ Tray will show a one-time trust prompt.
+  // Unsigned mode: QZ Tray shows a one-time trust prompt.
   // Click "Allow Always" — never asked again on this machine.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  q.security.setCertificatePromise((resolve: any) => resolve())
+  q.security.setCertificatePromise((_resolve: () => void, reject: () => void) => reject())
   q.security.setSignatureAlgorithm('SHA512')
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  q.security.setSignaturePromise(() => (resolve: any) => resolve())
+  q.security.setSignaturePromise(() => (_resolve: () => void, reject: () => void) => reject())
 
   try {
     await q.websocket.connect({ host: 'localhost', port: 8182, retries: 2, delay: 0.5 })

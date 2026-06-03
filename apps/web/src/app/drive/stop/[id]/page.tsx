@@ -325,10 +325,32 @@ function StopDetailInner() {
     router.push(backHref)
   }
 
+  const createPickupStop = trpc.pickupStops.createOneOff.useMutation({
+    onSuccess: () => {
+      toast.success('Delivery complete — pickup stop created for today!')
+      router.push(backHref)
+    },
+    onError: () => {
+      toast.success('Delivery complete!')
+      router.push(backHref)
+    },
+  })
+
   const handlePickupYes = () => {
     setShowPickupPrompt(false)
-    toast.success('Delivery complete — note this stop for pickup scheduling')
-    router.push(backHref)
+    const customer = stop.customer as { id: string } | null
+    if (customer?.id) {
+      createPickupStop.mutate({
+        customer_id: customer.id,
+        type: 'pickup',
+        scheduled_date: new Date().toISOString().split('T')[0],
+        zone_id: stop.zone_id as string ?? null,
+        notes: 'Pickup flagged by driver during delivery',
+      })
+    } else {
+      toast.success('Delivery complete!')
+      router.push(backHref)
+    }
   }
 
   const handlePickupNo = () => {

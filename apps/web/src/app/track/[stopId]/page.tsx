@@ -347,9 +347,6 @@ export default function TrackPage() {
         )}
       </div>
 
-      {/* Live map — only when driver is en route with location */}
-      {showMap && <DriverMap data={data} />}
-
       {/* Status card */}
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <div className="flex flex-col items-center">
@@ -380,6 +377,9 @@ export default function TrackPage() {
           )}
         </div>
       </div>
+
+      {/* Live map — below status card, only when driver has location */}
+      {showMap && <DriverMap data={data} />}
 
       {data.status !== 'completed' && data.status !== 'skipped' && (
         <p className="text-xs text-gray-400">

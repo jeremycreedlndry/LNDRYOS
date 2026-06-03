@@ -263,7 +263,7 @@ function StopDetailInner() {
   // ── GPS broadcasting — runs while stop is en_route ─────────────────────
   const gpsRef = useRef<ReturnType<typeof setInterval> | null>(null)
   useEffect(() => {
-    if (stop.status !== 'en_route') {
+    if (!stop || stop.status !== 'en_route') {
       if (gpsRef.current) { clearInterval(gpsRef.current); gpsRef.current = null }
       return
     }

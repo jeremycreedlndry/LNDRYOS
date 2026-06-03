@@ -33,12 +33,23 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (tenantIdFromCookie) {
     query = query.eq('tenant_id', tenantIdFromCookie)
   } else {
-    query = query.order('created_at', { ascending: false })  // newest owner = primary tenant
+    query = query.order('created_at', { ascending: true })
   }
 
   const { data: members } = await query
-  // Prefer owner role, then newest membership
-  const member = members?.find((m: { role: string }) => m.role === 'owner') ?? members?.[0] ?? null
+
+  let member = null
+  if (!tenantIdFromCookie) {
+    // Pick the owner tenant that has delivery zones (the real store, not a test tenant)
+    const ownerMembers = (members ?? []).filter((m: { role: string }) => m.role === 'owner')
+    for (const m of ownerMembers) {
+      const { data: zones } = await service.from('delivery_zones').select('id').eq('tenant_id', m.tenant_id).limit(1)
+      if (zones && zones.length > 0) { member = m; break }
+    }
+    member = member ?? ownerMembers[0] ?? (members ?? [])[0] ?? null
+  } else {
+    member = (members ?? [])[0] ?? null
+  }
 
   if (!member) redirect('/onboarding')
 

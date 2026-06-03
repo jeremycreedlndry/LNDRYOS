@@ -22,17 +22,28 @@ export default function LoginPage() {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
 
-      // Pick the tenant where the user is owner with the most recent creation date
-      // (skips test/onboarding tenants created earlier)
+      // Pick the tenant where user is owner AND has delivery zones (real tenant)
+      // Falls back to oldest owner membership if none have zones
       const { data: members } = await supabase
         .from('tenant_members')
         .select('tenant_id, role, created_at')
         .eq('user_id', data.user.id)
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: true })
 
-      // Prefer owner role, then fall back to any membership — take the newest
-      const ownerMember = members?.find((m) => m.role === 'owner')
-      const member = ownerMember ?? members?.[0] ?? null
+      const ownerMembers = members?.filter((m) => m.role === 'owner') ?? []
+
+      // Find the owner tenant that has delivery zones — that's the real store
+      let member = null
+      for (const m of ownerMembers) {
+        const { data: zones } = await supabase
+          .from('delivery_zones')
+          .select('id')
+          .eq('tenant_id', m.tenant_id)
+          .limit(1)
+        if (zones && zones.length > 0) { member = m; break }
+      }
+      // Fall back to oldest owner, then oldest membership
+      member = member ?? ownerMembers[0] ?? members?.[0] ?? null
 
       if (member?.tenant_id) {
         document.cookie = `tenant_id=${member.tenant_id}; path=/; max-age=31536000`

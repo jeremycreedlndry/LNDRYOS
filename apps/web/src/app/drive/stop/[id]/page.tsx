@@ -280,7 +280,7 @@ function StopDetailInner() {
     sendLocation() // immediately on mount
     gpsRef.current = setInterval(sendLocation, 30_000)
     return () => { if (gpsRef.current) clearInterval(gpsRef.current) }
-  }, [stop.status, stopId])
+  }, [stop?.status, stopId])
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleClaim = () => claimStop.mutate({ id: stopId })

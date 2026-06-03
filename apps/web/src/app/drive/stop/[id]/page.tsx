@@ -520,10 +520,10 @@ function StopDetailInner() {
           <div className="mx-4 mt-3 bg-white rounded-2xl shadow-sm p-4 space-y-4">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Complete Stop</p>
 
-            {/* Bag count */}
-            <div>
+            {/* Bag count — pickups only, not needed for deliveries */}
+            {!isDelivery && <div>
               <label className="text-sm text-gray-600 font-medium block mb-1.5">
-                {isDelivery ? 'Bags delivered' : 'Bags picked up'}
+                Bags picked up
               </label>
               <div className="flex items-center gap-3">
                 <button
@@ -543,7 +543,7 @@ function StopDetailInner() {
                   className="h-10 w-10 rounded-full border border-gray-200 text-gray-700 text-xl font-bold flex items-center justify-center"
                 >+</button>
               </div>
-            </div>
+            </div>}
 
             {/* Notes */}
             <div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, Suspense, useEffect, useRef } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft, Phone, Navigation, AlertTriangle, Camera,
@@ -176,6 +176,27 @@ function NothingToPickupModal({ onSubmit, onCancel }: {
   )
 }
 
+// ─── GPS broadcaster — only mounted when status is confirmed en_route ────────
+function GPSBroadcaster({ stopId }: { stopId: string }) {
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    const send = () => {
+      if (!navigator.geolocation) return
+      navigator.geolocation.getCurrentPosition((pos) => {
+        fetch(`/api/track/${stopId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        }).catch(() => {})
+      }, () => {}, { enableHighAccuracy: true, timeout: 10000 })
+    }
+    send()
+    intervalRef.current = setInterval(send, 30_000)
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+  }, [stopId])
+  return null // invisible — just broadcasts location
+}
+
 // ─── Main stop detail ─────────────────────────────────────────────────────────
 function StopDetailInner() {
   const router = useRouter()
@@ -259,6 +280,7 @@ function StopDetailInner() {
   } | null
 
   const backHref = `/drive/route${zonesParam ? `?zones=${zonesParam}` : ''}`
+  const isEnRoute = stop.status === 'en_route'
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleClaim = () => claimStop.mutate({ id: stopId })
@@ -336,6 +358,8 @@ function StopDetailInner() {
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
+      {/* GPS broadcaster — only active when en_route, invisible */}
+      {isEnRoute && <GPSBroadcaster stopId={stopId} />}
 
       {/* Header */}
       <div className="bg-brand-600 text-white px-4 pt-12 pb-4 safe-top">

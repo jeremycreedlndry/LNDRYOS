@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, Suspense, useEffect, useRef } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft, Phone, Navigation, AlertTriangle, Camera,
@@ -259,6 +259,28 @@ function StopDetailInner() {
   } | null
 
   const backHref = `/drive/route${zonesParam ? `?zones=${zonesParam}` : ''}`
+
+  // ── GPS broadcasting — runs while stop is en_route ─────────────────────
+  const gpsRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    if (stop.status !== 'en_route') {
+      if (gpsRef.current) { clearInterval(gpsRef.current); gpsRef.current = null }
+      return
+    }
+    const sendLocation = () => {
+      if (!navigator.geolocation) return
+      navigator.geolocation.getCurrentPosition((pos) => {
+        fetch(`/api/track/${stopId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        }).catch(() => {})
+      })
+    }
+    sendLocation() // immediately on mount
+    gpsRef.current = setInterval(sendLocation, 30_000)
+    return () => { if (gpsRef.current) clearInterval(gpsRef.current) }
+  }, [stop.status, stopId])
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleClaim = () => claimStop.mutate({ id: stopId })

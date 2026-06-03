@@ -211,6 +211,30 @@ function StopDetailInner() {
   const [showNothingModal, setShowNothingModal] = useState(false)
   const [showPickupPrompt, setShowPickupPrompt] = useState(false)
   const [completing, setCompleting] = useState(false)
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const photoInputRef = useRef<HTMLInputElement>(null)
+
+  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingPhoto(true)
+    try {
+      const { createBrowserClient } = await import('@/lib/supabase-client')
+      const supabase = createBrowserClient()
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      const path = `driver/${stopId}_${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('order-issues').upload(path, file, { upsert: true })
+      if (error) throw error
+      const { data } = supabase.storage.from('order-issues').getPublicUrl(path)
+      setPhotoUrl(data.publicUrl)
+      toast.success('Photo attached')
+    } catch {
+      toast.error('Photo upload failed')
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }
 
   const { data: me } = trpc.staff.myRole.useQuery()
   const { data: stop, refetch, isLoading } = trpc.pickupStops.getStop.useQuery({ id: stopId })
@@ -292,6 +316,7 @@ function StopDetailInner() {
       status: 'completed',
       driver_notes: driverNotes || null,
       bag_count: bagCount ? parseInt(bagCount) : null,
+      photo_url: photoUrl ?? null,
     })
     setCompleting(false)
 
@@ -579,11 +604,36 @@ function StopDetailInner() {
               />
             </div>
 
-            {/* Photo placeholder */}
-            <button className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl py-3 text-gray-400 text-sm">
-              <Camera className="h-5 w-5" />
-              Add photo (coming soon)
-            </button>
+            {/* Photo — proof of delivery */}
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handlePhotoCapture}
+            />
+            {photoUrl ? (
+              <div className="relative rounded-xl overflow-hidden border border-gray-200">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={photoUrl} alt="Proof of delivery" className="w-full object-cover max-h-48" />
+                <button
+                  onClick={() => setPhotoUrl(null)}
+                  className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
+                >
+                  <XCircle className="h-5 w-5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => photoInputRef.current?.click()}
+                disabled={uploadingPhoto}
+                className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl py-3 text-gray-400 text-sm active:bg-gray-50"
+              >
+                <Camera className="h-5 w-5" />
+                {uploadingPhoto ? 'Uploading…' : 'Add proof of delivery photo'}
+              </button>
+            )}
           </div>
         )}
       </div>

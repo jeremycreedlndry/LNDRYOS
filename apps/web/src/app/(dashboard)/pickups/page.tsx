@@ -80,6 +80,8 @@ function StopCard({ stop, onStatusChange }: {
     customer: { id: string; first_name: string; last_name: string; phone: string | null; address_street: string | null; address_city: string | null; driver_instructions: string | null } | null
     zone: { name: string; color: string } | null
     driver_notes: string | null
+    photo_url: string | null
+    bag_count: number | null
   }
   onStatusChange: (id: string, status: string, customer: typeof stop['customer']) => void
 }) {
@@ -493,6 +495,16 @@ const assignDriver = trpc.pickupStops.assignDriver.useMutation({
                       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                       {(s as any).order?.notes && <p className="text-xs text-gray-500 mt-1">{(s as any).order.notes}</p>}
                       {s.notes && <p className="text-xs text-gray-400 mt-0.5 italic">"{s.notes}"</p>}
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                      {(s as any).driver_notes && <p className="text-xs text-amber-700 mt-0.5 italic">Driver: "{(s as any).driver_notes}"</p>}
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                      {(s as any).photo_url && (
+                        <a href={(s as any).photo_url} target="_blank" rel="noopener noreferrer" className="block mt-1">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={(s as any).photo_url} alt="Proof of delivery" className="rounded-lg max-h-32 object-cover border border-gray-200" />
+                          <p className="text-[10px] text-gray-400 mt-0.5">📷 Proof of delivery</p>
+                        </a>
+                      )}
                     </div>
                     {editId === s.id ? (
                       <div className="space-y-3 pt-1">

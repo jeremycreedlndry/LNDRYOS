@@ -9,7 +9,6 @@ import { OrderCart, type CartLine } from '@/components/pos/OrderCart'
 import { FulfillmentModal, type FulfillmentValue } from '@/components/pos/FulfillmentModal'
 import { PaymentModal } from '@/components/pos/PaymentModal'
 import { BagEntryModal } from '@/components/pos/BagEntryModal'
-import { ScheduleModal } from '@/components/pickups/ScheduleModal'
 import { CustomItemModal } from '@/components/pos/CustomItemModal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -234,7 +233,6 @@ function POSInner() {
   const [bagEntryItem, setBagEntryItem] = useState<ServiceItem | null>(null)
   const [pendingPrefs, setPendingPrefs] = useState<Record<string, string> | null>(null)
   const [mobileCartOpen, setMobileCartOpen] = useState(false)
-  const [schedulePickupOpen, setSchedulePickupOpen] = useState(false)
   const [customItemOpen, setCustomItemOpen] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const [showCancelModal, setShowCancelModal] = useState(false)
@@ -250,6 +248,8 @@ function POSInner() {
   const [deliveryTime, setDeliveryTime] = useState('')
   const [pickupDate, setPickupDate] = useState('')
   const [pickupTime, setPickupTime] = useState('')
+  const [pickupTimeEnd, setPickupTimeEnd] = useState('')
+  const [deliveryTimeEnd, setDeliveryTimeEnd] = useState('')
   // "Ready by" / due date (date 2) — surfaced from settings default, editable in the modal
   const [dueDate, setDueDate] = useState('')
   const [dueTime, setDueTime] = useState('')
@@ -286,15 +286,15 @@ function POSInner() {
     if (editOrder.customer) setCustomer(editOrder.customer as Customer)
 
     // Pre-fill the fulfillment selector from the order's existing pending stops
-    const stops = ((editOrder as { stops?: { type: string; status: string; scheduled_date: string; time_start: string | null }[] }).stops) ?? []
+    const stops = ((editOrder as { stops?: { type: string; status: string; scheduled_date: string; time_start: string | null; time_end: string | null }[] }).stops) ?? []
     const pendingPickup   = stops.find((s) => s.type === 'pickup'   && s.status === 'pending')
     const pendingDelivery = stops.find((s) => s.type === 'delivery' && s.status === 'pending')
     if (pendingPickup && pendingDelivery) setOrderType('both')
     else if (pendingPickup)               setOrderType('pickup')
     else if (pendingDelivery)             setOrderType('delivery')
     else                                  setOrderType('in_store')
-    if (pendingPickup)   { setPickupDate(pendingPickup.scheduled_date);     setPickupTime(pendingPickup.time_start?.slice(0, 5) ?? '') }
-    if (pendingDelivery) { setDeliveryDate(pendingDelivery.scheduled_date); setDeliveryTime(pendingDelivery.time_start?.slice(0, 5) ?? '') }
+    if (pendingPickup)   { setPickupDate(pendingPickup.scheduled_date);     setPickupTime(pendingPickup.time_start?.slice(0, 5) ?? '');     setPickupTimeEnd(pendingPickup.time_end?.slice(0, 5) ?? '') }
+    if (pendingDelivery) { setDeliveryDate(pendingDelivery.scheduled_date); setDeliveryTime(pendingDelivery.time_start?.slice(0, 5) ?? ''); setDeliveryTimeEnd(pendingDelivery.time_end?.slice(0, 5) ?? '') }
     if ((editOrder as { due_date?: string }).due_date) setDueDate((editOrder as { due_date?: string }).due_date!)
 
     setInitialized(true)
@@ -334,10 +334,10 @@ function POSInner() {
   // Apply the fulfillment modal's selection back into the POS state
   const applyFulfillment = (v: FulfillmentValue) => {
     setOrderType(v.type)
-    if (v.type === 'pickup' || v.type === 'both') { setPickupDate(v.date1); setPickupTime(v.time1) }
-    else { setPickupDate(''); setPickupTime('') }
-    if (v.type === 'delivery' || v.type === 'both') { setDeliveryDate(v.date2); setDeliveryTime(v.time2) }
-    else { setDeliveryDate(''); setDeliveryTime('') }
+    if (v.type === 'pickup' || v.type === 'both') { setPickupDate(v.date1); setPickupTime(v.time1); setPickupTimeEnd(v.time1End) }
+    else { setPickupDate(''); setPickupTime(''); setPickupTimeEnd('') }
+    if (v.type === 'delivery' || v.type === 'both') { setDeliveryDate(v.date2); setDeliveryTime(v.time2); setDeliveryTimeEnd(v.time2End) }
+    else { setDeliveryDate(''); setDeliveryTime(''); setDeliveryTimeEnd('') }
     // Date 2 is always the "out/ready" date → the order's due date
     setDueDate(v.date2); setDueTime(v.time2)
     setFulfillmentOpen(false)
@@ -401,10 +401,10 @@ function POSInner() {
       if (customer?.id && orderType !== 'in_store') {
         const stopBase = { customer_id: customer.id, order_id: order.id as string }
         if (orderType === 'pickup' || orderType === 'both') {
-          createStop.mutate({ ...stopBase, type: 'pickup', scheduled_date: pickupDate || (order.due_date as string), time_start: pickupTime || null })
+          createStop.mutate({ ...stopBase, type: 'pickup', scheduled_date: pickupDate || (order.due_date as string), time_start: pickupTime || null, time_end: pickupTimeEnd || null })
         }
         if (orderType === 'delivery' || orderType === 'both') {
-          createStop.mutate({ ...stopBase, type: 'delivery', scheduled_date: deliveryDate || (order.due_date as string), time_start: deliveryTime || null })
+          createStop.mutate({ ...stopBase, type: 'delivery', scheduled_date: deliveryDate || (order.due_date as string), time_start: deliveryTime || null, time_end: deliveryTimeEnd || null })
         }
       }
     },
@@ -427,18 +427,18 @@ function POSInner() {
 
     // Pickup
     if (wantPickup && !pendingPickup) {
-      await createStop.mutateAsync({ customer_id: customerId, order_id: orderId, type: 'pickup', scheduled_date: pickupDate || fallbackDate, time_start: pickupTime || null })
+      await createStop.mutateAsync({ customer_id: customerId, order_id: orderId, type: 'pickup', scheduled_date: pickupDate || fallbackDate, time_start: pickupTime || null, time_end: pickupTimeEnd || null })
     } else if (wantPickup && pendingPickup) {
-      await patchStop.mutateAsync({ id: pendingPickup.id, scheduled_date: pickupDate || pendingPickup.scheduled_date, time_start: pickupTime || null })
+      await patchStop.mutateAsync({ id: pendingPickup.id, scheduled_date: pickupDate || pendingPickup.scheduled_date, time_start: pickupTime || null, time_end: pickupTimeEnd || null })
     } else if (!wantPickup && pendingPickup) {
       await skipStop.mutateAsync({ id: pendingPickup.id, status: 'skipped' })
     }
 
     // Delivery
     if (wantDelivery && !pendingDelivery) {
-      await createStop.mutateAsync({ customer_id: customerId, order_id: orderId, type: 'delivery', scheduled_date: deliveryDate || fallbackDate, time_start: deliveryTime || null })
+      await createStop.mutateAsync({ customer_id: customerId, order_id: orderId, type: 'delivery', scheduled_date: deliveryDate || fallbackDate, time_start: deliveryTime || null, time_end: deliveryTimeEnd || null })
     } else if (wantDelivery && pendingDelivery) {
-      await patchStop.mutateAsync({ id: pendingDelivery.id, scheduled_date: deliveryDate || pendingDelivery.scheduled_date, time_start: deliveryTime || null })
+      await patchStop.mutateAsync({ id: pendingDelivery.id, scheduled_date: deliveryDate || pendingDelivery.scheduled_date, time_start: deliveryTime || null, time_end: deliveryTimeEnd || null })
     } else if (!wantDelivery && pendingDelivery) {
       await skipStop.mutateAsync({ id: pendingDelivery.id, status: 'skipped' })
     }
@@ -509,6 +509,7 @@ function POSInner() {
         lines: buildLines(),
         tax_rate: taxRate,
         delivery_fee_cents: customerDeliveryFee,
+        due_date: effectiveDueDate,
       })
       if (customer?.id) {
         try { await reconcileStops(editOrderId, customer.id) }
@@ -529,18 +530,19 @@ function POSInner() {
         })
         await createStop.mutateAsync({
           customer_id: customer.id, order_id: order.id as string, type: 'pickup',
-          scheduled_date: pickupDate || today, time_start: pickupTime || null,
+          scheduled_date: pickupDate || today, time_start: pickupTime || null, time_end: pickupTimeEnd || null,
         })
         if (orderType === 'both') {
           await createStop.mutateAsync({
             customer_id: customer.id, order_id: order.id as string, type: 'delivery',
-            scheduled_date: deliveryDate || today, time_start: deliveryTime || null,
+            scheduled_date: deliveryDate || today, time_start: deliveryTime || null, time_end: deliveryTimeEnd || null,
           })
         }
         utils.orders.list.invalidate()
         toast.success('Pickup order created — sent to Detail')
         setCartLines([]); setCustomer(null); setOrderType('in_store')
         setPickupDate(''); setPickupTime(''); setDeliveryDate(''); setDeliveryTime('')
+        setPickupTimeEnd(''); setDeliveryTimeEnd('')
         setDueDate(''); setDueTime('')
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to create pickup order')
@@ -555,7 +557,7 @@ function POSInner() {
         delivery_fee_cents: customerDeliveryFee,
       })
     }
-  }, [customer, cartLines, taxRate, createOrder, updateOrder, createPickupOrder, createStop, isEditMode, editOrderId, orderType, pickupDate, pickupTime, deliveryDate, deliveryTime, dueDate, effectiveDueDate, editOrder]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [customer, cartLines, taxRate, createOrder, updateOrder, createPickupOrder, createStop, isEditMode, editOrderId, orderType, pickupDate, pickupTime, pickupTimeEnd, deliveryDate, deliveryTime, deliveryTimeEnd, dueDate, effectiveDueDate, editOrder]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePaymentComplete = useCallback(async () => {
     // Load funds onto any physical gift cards in the order
@@ -613,6 +615,7 @@ function POSInner() {
     setLastCreatedOrder(null)
     setOrderType('in_store')
     setDeliveryDate(''); setDeliveryTime(''); setPickupDate(''); setPickupTime('')
+    setPickupTimeEnd(''); setDeliveryTimeEnd('')
     setDueDate(''); setDueTime('')
     if (physicalGiftCards.length === 0) toast.success('Order complete!')
   }, [cartLines, paymentOrderNumber, loadGiftCard, lastCreatedOrder, tenantSettings, taxRate])
@@ -648,18 +651,7 @@ function POSInner() {
       <div className="hidden lg:flex h-[calc(100vh-4rem)] gap-0" style={isEditMode ? { height: 'calc(100vh - 4rem - 2.25rem)' } : {}}>
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 border-r border-gray-200">
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Customer</h2>
-              {!isEditMode && (
-                <button
-                  onClick={() => setSchedulePickupOpen(true)}
-                  className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
-                >
-                  <Truck className="h-3.5 w-3.5" />
-                  Schedule Pickup
-                </button>
-              )}
-            </div>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Customer</h2>
             <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
           </div>
 
@@ -721,16 +713,17 @@ function POSInner() {
       {/* ── Mobile layout ───────────────────────────────────────────────────── */}
       <div className="flex lg:hidden flex-col h-[calc(100dvh-4rem-4rem)]">
         <div className="flex-1 overflow-y-auto p-3 space-y-3 pb-20">
-          {!isEditMode && (
-            <button
-              onClick={() => setSchedulePickupOpen(true)}
-              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-brand-200 bg-brand-50 py-2.5 text-sm font-medium text-brand-700 hover:bg-brand-100"
-            >
-              <Truck className="h-4 w-4" />
-              Schedule Pickup
-            </button>
-          )}
           <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
+          <button
+            onClick={() => setFulfillmentOpen(true)}
+            className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left text-sm font-medium text-gray-800 hover:border-brand-300"
+          >
+            <span className="flex items-center gap-2">
+              <Truck className="h-4 w-4 text-brand-500" />
+              {fulfillmentSummary}
+            </span>
+            <Pencil className="h-3.5 w-3.5 text-gray-400" />
+          </button>
           <ServiceGrid onAddItem={handleAddItem} onCustomItem={() => setCustomItemOpen(true)}
             activeCategory={activeCategory}
             onCategoryChange={setActiveCategory} priceListId={activePriceListId} />
@@ -763,8 +756,10 @@ function POSInner() {
             type: orderType,
             date1: (orderType === 'pickup' || orderType === 'both') ? pickupDate : isoToday(),
             time1: pickupTime,
+            time1End: pickupTimeEnd,
             date2: (orderType === 'delivery' || orderType === 'both') ? deliveryDate : effectiveDueDate,
             time2: (orderType === 'delivery' || orderType === 'both') ? deliveryTime : dueTime,
+            time2End: deliveryTimeEnd,
           }}
           onApply={applyFulfillment}
           onClose={() => setFulfillmentOpen(false)}
@@ -814,12 +809,6 @@ function POSInner() {
         </div>
       )}
 
-      {schedulePickupOpen && (
-        <ScheduleModal
-          onClose={() => setSchedulePickupOpen(false)}
-          onSaved={() => setSchedulePickupOpen(false)}
-        />
-      )}
 
       {showCancelModal && editOrderId && editOrder && (
         <CancelOrderModal

@@ -223,6 +223,7 @@ export const ordersRouter = router({
       tax_rate: z.number().min(0).max(1).default(0),
       discount_amount: z.number().int().nonnegative().default(0),
       delivery_fee_cents: z.number().int().nonnegative().optional(),
+      due_date: z.string().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       // Verify the order belongs to this tenant and is still editable
@@ -281,6 +282,7 @@ export const ordersRouter = router({
           delivery_fee_cents: deliveryFee,
           total_amount: total,
           status: newStatus,
+          ...(input.due_date !== undefined ? { due_date: input.due_date } : {}),
           updated_at: new Date().toISOString(),
         })
         .eq('id', input.id)

@@ -7,10 +7,24 @@ export type FulfillmentType = 'in_store' | 'delivery' | 'pickup' | 'both'
 
 export interface FulfillmentValue {
   type: FulfillmentType
-  date1: string   // yyyy-mm-dd — order/pickup date ("comes in")
-  time1: string   // HH:MM or ''
-  date2: string   // yyyy-mm-dd — ready/delivery date ("goes out")
+  date1: string      // yyyy-mm-dd — order/pickup date ("comes in")
+  time1: string      // HH:MM or ''  (start; for pickup this is the window start)
+  time1End: string   // HH:MM or ''  (pickup window end — only used for truck/window fields)
+  date2: string      // yyyy-mm-dd — ready/delivery date ("goes out")
   time2: string
+  time2End: string   // delivery window end
+}
+
+// Pickup & delivery (truck) fields use a time *window* (start–end); the store-side
+// fields (drop-off, ready-by) use a single time.
+function isWindow(type: FulfillmentType, field: 'date1' | 'date2') {
+  if (field === 'date1') return type === 'pickup' || type === 'both'
+  return type === 'delivery' || type === 'both'
+}
+function addHour(t: string) {
+  if (!t) return ''
+  const [h, m] = t.split(':').map(Number)
+  return `${String((h + 1) % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 const TYPE_OPTIONS: { value: FulfillmentType; label: string }[] = [
@@ -69,8 +83,10 @@ export function FulfillmentModal({ initial, defaultDueDays, onApply, onClose }: 
   const [type, setType] = useState<FulfillmentType>(initial.type)
   const [date1, setDate1] = useState(initial.date1 || today)
   const [time1, setTime1] = useState(initial.time1)
+  const [time1End, setTime1End] = useState(initial.time1End)
   const [date2, setDate2] = useState(initial.date2 || addDays(initial.date1 || today, defaultDueDays))
   const [time2, setTime2] = useState(initial.time2 || '17:00')
+  const [time2End, setTime2End] = useState(initial.time2End)
   // Whether the user has manually set date2 — if not, it tracks date1 + defaultDueDays.
   const [date2Touched, setDate2Touched] = useState(!!initial.date2)
   const [active, setActive] = useState<'date1' | 'date2'>('date1')
@@ -166,20 +182,37 @@ export function FulfillmentModal({ initial, defaultDueDays, onApply, onClose }: 
             </div>
           </div>
 
-          {/* Time for the active field */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-gray-500">
-              {active === 'date1' ? d1.label : d2.label} time
-            </label>
-            <input type="time" value={active === 'date1' ? time1 : time2}
-              onChange={(e) => active === 'date1' ? setTime1(e.target.value) : setTime2(e.target.value)}
-              className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
-          </div>
+          {/* Time for the active field — a window (start–end) for pickup/delivery, single otherwise */}
+          {(() => {
+            const window = isWindow(type, active)
+            const label = active === 'date1' ? d1.label : d2.label
+            const start = active === 'date1' ? time1 : time2
+            const end = active === 'date1' ? time1End : time2End
+            const setStart = (v: string) => {
+              if (active === 'date1') { setTime1(v); if (window && !time1End) setTime1End(addHour(v)) }
+              else { setTime2(v); if (window && !time2End) setTime2End(addHour(v)) }
+            }
+            const setEnd = (v: string) => active === 'date1' ? setTime1End(v) : setTime2End(v)
+            return (
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold text-gray-500">{label} {window ? 'window' : 'time'}</label>
+                <input type="time" value={start} onChange={(e) => setStart(e.target.value)}
+                  className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                {window && (
+                  <>
+                    <span className="text-gray-400">–</span>
+                    <input type="time" value={end} onChange={(e) => setEnd(e.target.value)}
+                      className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                  </>
+                )}
+              </div>
+            )
+          })()}
         </div>
 
         <div className="flex gap-2 border-t border-gray-100 px-5 py-3.5">
           <button onClick={onClose} className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50">Cancel</button>
-          <button onClick={() => onApply({ type, date1, time1, date2, time2 })} disabled={!date1 || !date2}
+          <button onClick={() => onApply({ type, date1, time1, time1End, date2, time2, time2End })} disabled={!date1 || !date2}
             className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40">Apply</button>
         </div>
       </div>

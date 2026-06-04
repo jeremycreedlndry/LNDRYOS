@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Plus, Search, Pencil, Trash2, X, Check, User, Truck } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Search, Pencil, Trash2, X, Check, User, Truck, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { trpc } from '@/lib/trpc'
@@ -21,13 +21,25 @@ export default function CustomersPage() {
   const [scheduleCustomer, setScheduleCustomer] = useState<Customer | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const debouncedQuery = useDebounce(query, 300)
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 50
 
-  const { data: customers = [], isLoading } = trpc.customers.list.useQuery(
-    debouncedQuery ? { query: debouncedQuery } : undefined
-  )
+  // Reset to the first page whenever the search changes
+  useEffect(() => { setPage(1) }, [debouncedQuery])
+
+  const { data, isLoading } = trpc.customers.listPaged.useQuery({
+    query: debouncedQuery || undefined,
+    page,
+    pageSize: PAGE_SIZE,
+  })
+  const customers = data?.rows ?? []
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
+  const rangeEnd = Math.min(page * PAGE_SIZE, total)
 
   const deleteCustomer = trpc.customers.delete.useMutation({
-    onSuccess: () => { utils.customers.list.invalidate(); setDeleteConfirm(null); toast.success('Customer removed') },
+    onSuccess: () => { utils.customers.listPaged.invalidate(); setDeleteConfirm(null); toast.success('Customer removed') },
     onError: (e) => toast.error(e.message),
   })
 
@@ -132,6 +144,34 @@ export default function CustomersPage() {
         })}
       </div>
 
+      {/* Pager */}
+      {total > 0 && (
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-xs text-gray-500">
+            Showing {rangeStart}–{rangeEnd} of {total}
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-4 w-4" /> Prev
+              </button>
+              <span className="text-sm text-gray-500">Page {page} of {totalPages}</span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {profileId && (
         <CustomerProfilePanel customerId={profileId} onClose={() => setProfileId(null)} initialTab={profileTab} />
       )}
@@ -140,7 +180,7 @@ export default function CustomersPage() {
         <CustomerModal
           customer={null}
           onClose={() => setShowAdd(false)}
-          onSaved={() => { utils.customers.list.invalidate(); setShowAdd(false) }}
+          onSaved={() => { utils.customers.listPaged.invalidate(); setShowAdd(false) }}
         />
       )}
 

@@ -83,6 +83,37 @@ export const customersRouter = router({
       return data ?? []
     }),
 
+  // Paginated list for the Customers page (returns rows + total count)
+  listPaged: tenantProcedure
+    .input(z.object({
+      query: z.string().optional(),
+      page: z.number().int().min(1).default(1),
+      pageSize: z.number().int().min(1).max(200).default(50),
+    }))
+    .query(async ({ ctx, input }) => {
+      const from = (input.page - 1) * input.pageSize
+      const to = from + input.pageSize - 1
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let q: any = ctx.supabase
+        .from('customers')
+        .select('*', { count: 'exact' })
+        .eq('tenant_id', ctx.tenantId)
+        .order('last_name')
+        .order('first_name')
+        .range(from, to)
+
+      if (input.query && input.query.trim().length >= 1) {
+        const tokens = input.query.trim().split(/\s+/).filter(Boolean)
+        for (const token of tokens) {
+          q = q.or(`first_name.ilike.%${token}%,last_name.ilike.%${token}%,phone.ilike.%${token}%,email.ilike.%${token}%`)
+        }
+      }
+
+      const { data, error, count } = await q
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return { rows: data ?? [], total: count ?? 0 }
+    }),
+
   search: tenantProcedure
     .input(z.object({ query: z.string().min(1), limit: z.number().default(10) }))
     .query(async ({ ctx, input }) => {

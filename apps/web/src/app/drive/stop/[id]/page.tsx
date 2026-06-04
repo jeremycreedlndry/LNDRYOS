@@ -269,6 +269,20 @@ function StopDetailInner() {
     onError: (e) => { toast.error(e.message); setCompleting(false) },
   })
 
+  // NOTE: these must stay above the early `if (isLoading || !stop) return` below —
+  // all hooks have to run in the same order on every render (React error #310).
+  const createPickupStop = trpc.pickupStops.createOneOff.useMutation({
+    onSuccess: () => {
+      toast.success('Picked up — order sent to Detail for weighing')
+      router.push(backHref)
+    },
+    onError: () => {
+      toast.success('Delivery complete!')
+      router.push(backHref)
+    },
+  })
+  const createPickupOrder = trpc.orders.createPickup.useMutation()
+
   const currentUserId = me?.userId ?? ''
 
   if (isLoading || !stop) {
@@ -364,18 +378,6 @@ function StopDetailInner() {
     toast.success('Stop recorded')
     router.push(backHref)
   }
-
-  const createPickupStop = trpc.pickupStops.createOneOff.useMutation({
-    onSuccess: () => {
-      toast.success('Picked up — order sent to Detail for weighing')
-      router.push(backHref)
-    },
-    onError: () => {
-      toast.success('Delivery complete!')
-      router.push(backHref)
-    },
-  })
-  const createPickupOrder = trpc.orders.createPickup.useMutation()
 
   const handlePickupYes = async (bagCount: number | null, note: string) => {
     setShowPickupPrompt(false)

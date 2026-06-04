@@ -89,7 +89,9 @@ export function FulfillmentModal({ initial, defaultDueDays, onApply, onClose }: 
   const [time2End, setTime2End] = useState(initial.time2End)
   // Whether the user has manually set date2 — if not, it tracks date1 + defaultDueDays.
   const [date2Touched, setDate2Touched] = useState(!!initial.date2)
-  const [active, setActive] = useState<'date1' | 'date2'>('date1')
+  // Focus the field that actually matters: pickup date for pickup types,
+  // otherwise the ready/delivery date (drop-off is "now" at the counter).
+  const [active, setActive] = useState<'date1' | 'date2'>(isWindow(initial.type, 'date1') ? 'date1' : 'date2')
 
   const { d1, d2 } = fieldMeta(type)
   const activeIso = active === 'date1' ? date1 : date2
@@ -184,6 +186,11 @@ export function FulfillmentModal({ initial, defaultDueDays, onApply, onClose }: 
 
           {/* Time for the active field — a window (start–end) for pickup/delivery, single otherwise */}
           {(() => {
+            // Drop-off (store-side date1 for in-store/delivery) is "now" — no time field.
+            const isDropoff = active === 'date1' && (type === 'in_store' || type === 'delivery')
+            if (isDropoff) {
+              return <p className="text-xs text-gray-400">Dropped off at the store — no time needed.</p>
+            }
             const window = isWindow(type, active)
             const label = active === 'date1' ? d1.label : d2.label
             const start = active === 'date1' ? time1 : time2

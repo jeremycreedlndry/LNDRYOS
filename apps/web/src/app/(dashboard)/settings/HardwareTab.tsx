@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { qzListPrinters, qzPrintZPL, qzPrintRaw, qzPrintHTML } from '@/lib/qzTray'
 import { LABEL_SIZE_PRESETS, DEFAULT_LABEL_SIZE, type LabelSize, buildReceiptHTML, buildLabelPreviewHTML } from '@/lib/printJobs'
 import { deriveStations, newStationId, type Station } from '@/lib/stations'
+import { useStation } from '@/components/station/StationProvider'
 import toast from 'react-hot-toast'
 
 // ─── Printer picker modal ─────────────────────────────────────────────────────
@@ -589,13 +590,15 @@ export function HardwareTab() {
   const [ready, setReady] = useState(false)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const { activeStation, setStation } = useStation()
 
   // Initialise from tenant settings once (migrating legacy hardware → "Front Desk")
   useEffect(() => {
     if (!tenant || ready) return
     const derived = deriveStations(tenant.settings)
     setStations(derived)
-    setSelectedId(derived[0]?.id ?? null)
+    setSelectedId(activeStation?.id ?? derived[0]?.id ?? null)
     setReady(true)
   }, [tenant, ready])
 
@@ -638,41 +641,62 @@ export function HardwareTab() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-base font-semibold text-gray-900">Hardware &amp; Stations</h2>
-        <p className="text-sm text-gray-500 mt-0.5">
-          A <strong>station</strong> is a spot in your store (e.g. front desk, delivery desk) with its own
-          printers and payment terminal. Each device picks its station at login.
-        </p>
-      </div>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Hardware</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Each <strong>station</strong> (e.g. front desk, delivery desk) has its own printers and payment
+            terminal. The ✓ marks the station this device is using.
+          </p>
+        </div>
 
-      {/* Station tabs */}
-      <div className="flex flex-wrap items-center gap-2">
-        {stations.map((s) => (
-          <div key={s.id}
-            className={cn('flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm',
-              selectedId === s.id ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}>
-            {renamingId === s.id ? (
-              <input autoFocus value={renameDraft}
-                onChange={(e) => setRenameDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setRenamingId(null); setRenameDraft('') } }}
-                onBlur={commitRename}
-                className="w-28 rounded border border-gray-200 px-1.5 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
-            ) : (
-              <>
-                <button onClick={() => setSelectedId(s.id)} className="flex items-center gap-1.5 font-medium">
-                  <MonitorSmartphone className="h-3.5 w-3.5" /> {s.name}
+        {/* Station dropdown */}
+        <div className="relative shrink-0">
+          {renamingId === selected?.id && selected ? (
+            <input autoFocus value={renameDraft}
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setRenamingId(null); setRenameDraft('') } }}
+              onBlur={commitRename}
+              className="w-44 rounded-lg border border-gray-200 px-2.5 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
+          ) : (
+            <div className="flex items-center gap-1.5">
+              {selected && (
+                <>
+                  <button onClick={() => { setRenamingId(selected.id); setRenameDraft(selected.name) }}
+                    className="text-gray-400 hover:text-brand-600" title="Rename station"><Pencil className="h-4 w-4" /></button>
+                  <button onClick={() => deleteStation(selected.id)}
+                    className="text-gray-400 hover:text-red-500" title="Delete station"><Trash2 className="h-4 w-4" /></button>
+                </>
+              )}
+              <button onClick={() => setMenuOpen((o) => !o)}
+                className="flex min-w-[170px] items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50">
+                <span className="flex items-center gap-1.5 truncate"><MonitorSmartphone className="h-4 w-4 text-brand-500" />{selected?.name ?? 'Select station'}</span>
+                <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
+              </button>
+            </div>
+          )}
+
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+              <div className="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                {stations.map((s) => (
+                  <button key={s.id}
+                    onClick={() => { setSelectedId(s.id); setStation(s.id); setMenuOpen(false) }}
+                    className="flex w-full items-center justify-between px-4 py-2 text-sm text-gray-800 hover:bg-gray-50">
+                    <span className="truncate">{s.name}</span>
+                    {activeStation?.id === s.id && <Check className="h-4 w-4 shrink-0 text-brand-600" />}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-gray-100" />
+                <button onClick={() => { addStation(); setMenuOpen(false) }}
+                  className="flex w-full items-center gap-2 px-4 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50">
+                  <Plus className="h-4 w-4" /> Add A New Station
                 </button>
-                <button onClick={() => { setRenamingId(s.id); setRenameDraft(s.name) }} className="text-gray-400 hover:text-brand-600"><Pencil className="h-3 w-3" /></button>
-                <button onClick={() => deleteStation(s.id)} className="text-gray-400 hover:text-red-500"><Trash2 className="h-3 w-3" /></button>
-              </>
-            )}
-          </div>
-        ))}
-        <button onClick={addStation}
-          className="flex items-center gap-1 rounded-xl border border-dashed border-gray-300 px-3 py-2 text-sm font-medium text-gray-500 hover:border-brand-400 hover:text-brand-600">
-          <Plus className="h-4 w-4" /> Add station
-        </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {stations.length === 0 && (

@@ -2,10 +2,11 @@
 
 import { useState, useCallback, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { X, ShoppingCart, ArrowLeft, Truck, Trash2 } from 'lucide-react'
+import { X, ShoppingCart, ArrowLeft, Truck, Trash2, Pencil } from 'lucide-react'
 import { CustomerSearch } from '@/components/pos/CustomerSearch'
 import { ServiceGrid } from '@/components/pos/ServiceGrid'
 import { OrderCart, type CartLine } from '@/components/pos/OrderCart'
+import { FulfillmentModal, type FulfillmentValue } from '@/components/pos/FulfillmentModal'
 import { PaymentModal } from '@/components/pos/PaymentModal'
 import { BagEntryModal } from '@/components/pos/BagEntryModal'
 import { ScheduleModal } from '@/components/pickups/ScheduleModal'
@@ -200,6 +201,21 @@ function MobileCartSheet({ lines, taxRate, hasCustomer, isSubmitting, onUpdateQu
 
 // ─── POS inner (needs useSearchParams, wrapped in Suspense below) ─────────────
 
+function isoToday() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function addDaysIso(iso: string, n: number) {
+  const [y, m, d] = iso.split('-').map(Number)
+  const dt = new Date(y, m - 1, d); dt.setDate(dt.getDate() + n)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+function fmtShortDate(iso: string) {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })
+}
+
 function POSInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -234,6 +250,10 @@ function POSInner() {
   const [deliveryTime, setDeliveryTime] = useState('')
   const [pickupDate, setPickupDate] = useState('')
   const [pickupTime, setPickupTime] = useState('')
+  // "Ready by" / due date (date 2) — surfaced from settings default, editable in the modal
+  const [dueDate, setDueDate] = useState('')
+  const [dueTime, setDueTime] = useState('')
+  const [fulfillmentOpen, setFulfillmentOpen] = useState(false)
 
   const handleCartDiscountChange = (cents: number, promoCodeId?: string) => {
     setCartDiscountCents(cents)
@@ -275,6 +295,7 @@ function POSInner() {
     else                                  setOrderType('in_store')
     if (pendingPickup)   { setPickupDate(pendingPickup.scheduled_date);     setPickupTime(pendingPickup.time_start?.slice(0, 5) ?? '') }
     if (pendingDelivery) { setDeliveryDate(pendingDelivery.scheduled_date); setDeliveryTime(pendingDelivery.time_start?.slice(0, 5) ?? '') }
+    if ((editOrder as { due_date?: string }).due_date) setDueDate((editOrder as { due_date?: string }).due_date!)
 
     setInitialized(true)
   }, [editOrder, initialized])
@@ -306,6 +327,31 @@ function POSInner() {
   useEffect(() => { ensureGiftCards.mutate() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const taxRate = (tenantSettings?.settings as { tax_rate?: number })?.tax_rate ?? 0
+  const defaultDueDays = (tenantSettings?.settings as { default_due_days?: number })?.default_due_days ?? 2
+  // "Ready by" date — what's set in the modal, else today + the store default
+  const effectiveDueDate = dueDate || addDaysIso(isoToday(), defaultDueDays)
+
+  // Apply the fulfillment modal's selection back into the POS state
+  const applyFulfillment = (v: FulfillmentValue) => {
+    setOrderType(v.type)
+    if (v.type === 'pickup' || v.type === 'both') { setPickupDate(v.date1); setPickupTime(v.time1) }
+    else { setPickupDate(''); setPickupTime('') }
+    if (v.type === 'delivery' || v.type === 'both') { setDeliveryDate(v.date2); setDeliveryTime(v.time2) }
+    else { setDeliveryDate(''); setDeliveryTime('') }
+    // Date 2 is always the "out/ready" date → the order's due date
+    setDueDate(v.date2); setDueTime(v.time2)
+    setFulfillmentOpen(false)
+  }
+
+  // Summary shown on the POS button that opens the modal
+  const fulfillmentSummary = (() => {
+    const ready = fmtShortDate(effectiveDueDate)
+    if (orderType === 'in_store') return `In-Store · Ready ${ready}`
+    if (orderType === 'pickup')   return `Pickup ${fmtShortDate(pickupDate)} · Ready ${ready}`
+    if (orderType === 'delivery') return `Delivery ${ready}`
+    return `Pickup ${fmtShortDate(pickupDate)} · Delivery ${fmtShortDate(deliveryDate)}`
+  })()
+
   const tenantDeliveryFee = (tenantSettings?.settings as { delivery_fee_cents?: number })?.delivery_fee_cents ?? 0
   // Effective delivery fee: customer override > tenant default; null on customer = use tenant default
   const customerDeliveryFee = customer
@@ -495,23 +541,21 @@ function POSInner() {
         toast.success('Pickup order created — sent to Detail')
         setCartLines([]); setCustomer(null); setOrderType('in_store')
         setPickupDate(''); setPickupTime(''); setDeliveryDate(''); setDeliveryTime('')
+        setDueDate(''); setDueTime('')
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to create pickup order')
       }
     } else {
-      const defaultDueDays = (tenantSettings?.settings as Record<string, unknown> | null)?.default_due_days as number | undefined ?? 2
-      const dueDate = new Date()
-      dueDate.setDate(dueDate.getDate() + defaultDueDays)
       createOrder.mutate({
         customer_id: customer?.id ?? null,
         customer_name: customer ? `${customer.first_name} ${customer.last_name}` : null,
         lines: buildLines(),
         tax_rate: taxRate,
-        due_date: dueDate.toISOString().split('T')[0],
+        due_date: effectiveDueDate,
         delivery_fee_cents: customerDeliveryFee,
       })
     }
-  }, [customer, cartLines, taxRate, createOrder, updateOrder, createPickupOrder, createStop, isEditMode, editOrderId, orderType, pickupDate, pickupTime, deliveryDate, deliveryTime, editOrder]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [customer, cartLines, taxRate, createOrder, updateOrder, createPickupOrder, createStop, isEditMode, editOrderId, orderType, pickupDate, pickupTime, deliveryDate, deliveryTime, dueDate, effectiveDueDate, editOrder]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePaymentComplete = useCallback(async () => {
     // Load funds onto any physical gift cards in the order
@@ -569,6 +613,7 @@ function POSInner() {
     setLastCreatedOrder(null)
     setOrderType('in_store')
     setDeliveryDate(''); setDeliveryTime(''); setPickupDate(''); setPickupTime('')
+    setDueDate(''); setDueTime('')
     if (physicalGiftCards.length === 0) toast.success('Order complete!')
   }, [cartLines, paymentOrderNumber, loadGiftCard, lastCreatedOrder, tenantSettings, taxRate])
 
@@ -618,50 +663,20 @@ function POSInner() {
             <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
           </div>
 
-          {/* Order type selector */}
-          {(
-            <div>
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Order Type</h2>
-              <select
-                value={orderType}
-                onChange={(e) => setOrderType(e.target.value as OrderType)}
-                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 mb-2 focus:outline-none focus:ring-1 focus:ring-brand-400"
-              >
-                <option value="in_store">In-Store — drop off &amp; collect at store</option>
-                <option value="delivery">Delivery — deliver back to customer</option>
-                <option value="pickup">Pickup — collect from customer</option>
-                <option value="both">Pickup &amp; Delivery</option>
-              </select>
-              {(orderType === 'pickup' || orderType === 'both') && (
-                <div className="flex gap-2 mb-2">
-                  <div className="flex-1">
-                    <label className="text-[10px] font-medium text-gray-500 block mb-1">Pickup Date</label>
-                    <input type="date" value={pickupDate} onChange={e => setPickupDate(e.target.value)}
-                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
-                  </div>
-                  <div className="w-24">
-                    <label className="text-[10px] font-medium text-gray-500 block mb-1">Time</label>
-                    <input type="time" value={pickupTime} onChange={e => setPickupTime(e.target.value)}
-                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
-                  </div>
-                </div>
-              )}
-              {(orderType === 'delivery' || orderType === 'both') && (
-                <div className="flex gap-2 mb-2">
-                  <div className="flex-1">
-                    <label className="text-[10px] font-medium text-gray-500 block mb-1">Delivery Date</label>
-                    <input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)}
-                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
-                  </div>
-                  <div className="w-24">
-                    <label className="text-[10px] font-medium text-gray-500 block mb-1">Time</label>
-                    <input type="time" value={deliveryTime} onChange={e => setDeliveryTime(e.target.value)}
-                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Fulfillment — type + dates, edited in a modal */}
+          <div>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Fulfillment</h2>
+            <button
+              onClick={() => setFulfillmentOpen(true)}
+              className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left text-sm font-medium text-gray-800 hover:border-brand-300 hover:bg-brand-50/40"
+            >
+              <span className="flex items-center gap-2">
+                <Truck className="h-4 w-4 text-brand-500" />
+                {fulfillmentSummary}
+              </span>
+              <Pencil className="h-3.5 w-3.5 text-gray-400" />
+            </button>
+          </div>
 
           <div>
             <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Services</h2>
@@ -740,6 +755,21 @@ function POSInner() {
           </button>
         </div>
       </div>
+
+      {fulfillmentOpen && (
+        <FulfillmentModal
+          defaultDueDays={defaultDueDays}
+          initial={{
+            type: orderType,
+            date1: (orderType === 'pickup' || orderType === 'both') ? pickupDate : isoToday(),
+            time1: pickupTime,
+            date2: (orderType === 'delivery' || orderType === 'both') ? deliveryDate : effectiveDueDate,
+            time2: (orderType === 'delivery' || orderType === 'both') ? deliveryTime : dueTime,
+          }}
+          onApply={applyFulfillment}
+          onClose={() => setFulfillmentOpen(false)}
+        />
+      )}
 
       {mobileCartOpen && (
         <MobileCartSheet lines={cartLines} taxRate={taxRate} hasCustomer={!!customer}

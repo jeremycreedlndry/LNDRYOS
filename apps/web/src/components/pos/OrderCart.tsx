@@ -33,6 +33,9 @@ interface Props {
   isSubmitting: boolean
   checkoutLabel?: string
   onDiscountChange?: (cents: number, promoCodeId?: string) => void
+  // When true, the order can be checked out with no items (e.g. a pickup —
+  // laundry isn't collected yet, so it becomes a $0 pending "Detail" order).
+  allowEmpty?: boolean
 }
 
 export function OrderCart({
@@ -47,6 +50,7 @@ export function OrderCart({
   isSubmitting,
   checkoutLabel,
   onDiscountChange,
+  allowEmpty = false,
 }: Props) {
   const subtotal = lines.reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
   const taxableSubtotal = lines
@@ -169,7 +173,7 @@ export function OrderCart({
     return `${formatCurrency(code.discount_value)} off`
   }
 
-  if (lines.length === 0) {
+  if (lines.length === 0 && !allowEmpty) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 py-12 text-gray-400">
         <p className="text-sm">Add items to start an order</p>
@@ -180,6 +184,12 @@ export function OrderCart({
   return (
     <div className="flex flex-1 flex-col">
       <div className="flex-1 overflow-y-auto">
+        {lines.length === 0 && allowEmpty && (
+          <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center">
+            <p className="text-sm font-medium text-gray-600">No items yet</p>
+            <p className="mt-1 text-xs text-gray-400">The order will be weighed and detailed after pickup.</p>
+          </div>
+        )}
         {lines.map((line) => (
           <div key={line.key} className="flex items-center gap-3 border-b border-gray-100 py-3">
             <div className="flex-1 min-w-0">
@@ -376,7 +386,7 @@ export function OrderCart({
       )}
       <Button
         onClick={onCheckout}
-        disabled={isSubmitting || lines.length === 0 || !hasCustomer}
+        disabled={isSubmitting || (lines.length === 0 && !allowEmpty) || !hasCustomer}
         size="xl"
         className="mt-2 w-full"
       >

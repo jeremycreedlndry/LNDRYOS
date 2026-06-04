@@ -316,6 +316,7 @@ function POSInner() {
   const createStop = trpc.pickupStops.createOneOff.useMutation()
   const patchStop  = trpc.pickupStops.patchStop.useMutation()
   const skipStop   = trpc.pickupStops.updateStatus.useMutation()
+  const createPickupOrder = trpc.orders.createPickup.useMutation()
 
   const createOrder = trpc.orders.create.useMutation({
     onSuccess: (order) => {
@@ -470,6 +471,33 @@ function POSInner() {
       utils.orders.list.invalidate()
       toast.success('Order updated')
       router.push('/orders')
+    } else if (cartLines.length === 0 && (orderType === 'pickup' || orderType === 'both') && customer?.id) {
+      // Empty pickup: no items yet (laundry not collected) → create a $0 pending
+      // "Detail" order + scheduled stops; it gets weighed when it arrives.
+      const today = new Date().toISOString().split('T')[0]
+      try {
+        const order = await createPickupOrder.mutateAsync({
+          customer_id: customer.id,
+          scheduled_date: pickupDate || today,
+          skip_stop: true,
+        })
+        await createStop.mutateAsync({
+          customer_id: customer.id, order_id: order.id as string, type: 'pickup',
+          scheduled_date: pickupDate || today, time_start: pickupTime || null,
+        })
+        if (orderType === 'both') {
+          await createStop.mutateAsync({
+            customer_id: customer.id, order_id: order.id as string, type: 'delivery',
+            scheduled_date: deliveryDate || today, time_start: deliveryTime || null,
+          })
+        }
+        utils.orders.list.invalidate()
+        toast.success('Pickup order created — sent to Detail')
+        setCartLines([]); setCustomer(null); setOrderType('in_store')
+        setPickupDate(''); setPickupTime(''); setDeliveryDate(''); setDeliveryTime('')
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to create pickup order')
+      }
     } else {
       const defaultDueDays = (tenantSettings?.settings as Record<string, unknown> | null)?.default_due_days as number | undefined ?? 2
       const dueDate = new Date()
@@ -483,7 +511,7 @@ function POSInner() {
         delivery_fee_cents: customerDeliveryFee,
       })
     }
-  }, [customer, cartLines, taxRate, createOrder, updateOrder, isEditMode, editOrderId, orderType, pickupDate, pickupTime, deliveryDate, deliveryTime, editOrder]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [customer, cartLines, taxRate, createOrder, updateOrder, createPickupOrder, createStop, isEditMode, editOrderId, orderType, pickupDate, pickupTime, deliveryDate, deliveryTime, editOrder]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePaymentComplete = useCallback(async () => {
     // Load funds onto any physical gift cards in the order
@@ -550,7 +578,9 @@ function POSInner() {
     .reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
   const cartTotal = cartSubtotal + Math.round(cartTaxableSubtotal * taxRate)
   const cartItemCount = cartLines.reduce((s, l) => s + (l.unit_label === 'lb' ? 1 : l.quantity), 0)
-  const isSubmitting = createOrder.isPending || updateOrder.isPending
+  const isSubmitting = createOrder.isPending || updateOrder.isPending || createPickupOrder.isPending || createStop.isPending
+  // A pickup with no items yet → allow a $0 pending "Detail" order (weighed after pickup)
+  const isEmptyPickup = !isEditMode && cartLines.length === 0 && (orderType === 'pickup' || orderType === 'both')
 
   return (
     <>
@@ -592,24 +622,16 @@ function POSInner() {
           {(
             <div>
               <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Order Type</h2>
-              <div className="grid grid-cols-4 gap-1.5 mb-2">
-                {([
-                  { value: 'in_store', label: 'In-Store' },
-                  { value: 'delivery', label: '+ Delivery' },
-                  { value: 'pickup',   label: '+ Pickup' },
-                  { value: 'both',     label: 'Pickup & Delivery' },
-                ] as const).map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setOrderType(opt.value)}
-                    className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors text-center ${
-                      orderType === opt.value
-                        ? 'border-brand-500 bg-brand-50 text-brand-700'
-                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >{opt.label}</button>
-                ))}
-              </div>
+              <select
+                value={orderType}
+                onChange={(e) => setOrderType(e.target.value as OrderType)}
+                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 mb-2 focus:outline-none focus:ring-1 focus:ring-brand-400"
+              >
+                <option value="in_store">In-Store — drop off &amp; collect at store</option>
+                <option value="delivery">Delivery — deliver back to customer</option>
+                <option value="pickup">Pickup — collect from customer</option>
+                <option value="both">Pickup &amp; Delivery</option>
+              </select>
               {(orderType === 'pickup' || orderType === 'both') && (
                 <div className="flex gap-2 mb-2">
                   <div className="flex-1">
@@ -671,11 +693,12 @@ function POSInner() {
           </div>
           <OrderCart lines={cartLines} taxRate={taxRate}
             hasCustomer={!!customer} customerId={customer?.id ?? null}
-            deliveryFeeCents={customerDeliveryFee}
+            deliveryFeeCents={isEmptyPickup ? 0 : customerDeliveryFee}
+            allowEmpty={isEmptyPickup}
             onUpdateQuantity={handleUpdateQty}
             onRemoveLine={(key) => setCartLines((prev) => prev.filter((l) => l.key !== key))}
             onCheckout={handleCheckout} isSubmitting={isSubmitting}
-            checkoutLabel={isEditMode ? 'Save Changes' : undefined}
+            checkoutLabel={isEditMode ? 'Save Changes' : isEmptyPickup ? 'Create Pickup Order' : undefined}
             onDiscountChange={handleCartDiscountChange} />
         </div>
       </div>

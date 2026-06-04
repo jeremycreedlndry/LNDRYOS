@@ -8,6 +8,7 @@ import type { EquipmentType } from '@laundry/db'
 import toast from 'react-hot-toast'
 import { OrderDetailModal } from '@/app/(dashboard)/orders/OrderDetailModal'
 import { printBagOutLabels, type LabelSize } from '@/lib/printJobs'
+import { useStation } from '@/components/station/StationProvider'
 
 // ─── Bag count modal (workflow) ───────────────────────────────────────────────
 
@@ -1147,6 +1148,7 @@ export default function WorkflowPage() {
   const [markCleanedOrder, setMarkCleanedOrder] = useState<OrderRow | null>(null)
   const [bagCountOrder, setBagCountOrder] = useState<OrderRow | null>(null)
   const { data: tenant } = trpc.tenants.getCurrent.useQuery(undefined, { staleTime: 60_000 })
+  const { hardware: stationHw } = useStation()
 
   const allOrders = orders as unknown as OrderRow[]
 
@@ -1257,7 +1259,7 @@ export default function WorkflowPage() {
     setBagCountOrder(null)
 
     // Print bag-out labels if configured
-    const hw = (tenant?.settings as Record<string, unknown> | null)?.hardware as Record<string, unknown> | undefined
+    const hw = stationHw as Record<string, unknown> | undefined
     const labelPrinter = (hw?.label_printer as Record<string, string> | undefined)?.name
     if (labelPrinter && bagCount && bagCount > 0) {
       const labelSize = hw?.label_size as LabelSize | undefined

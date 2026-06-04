@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Printer, CreditCard, Check, X, ChevronDown, ChevronUp, Search, Zap } from 'lucide-react'
+import { Printer, CreditCard, Check, X, ChevronDown, ChevronUp, Search, Zap, Plus, MonitorSmartphone, Pencil, Trash2 } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { qzListPrinters, qzPrintZPL, qzPrintRaw, qzPrintHTML } from '@/lib/qzTray'
 import { LABEL_SIZE_PRESETS, DEFAULT_LABEL_SIZE, type LabelSize, buildReceiptHTML, buildLabelPreviewHTML } from '@/lib/printJobs'
+import { deriveStations, newStationId, type Station } from '@/lib/stations'
 import toast from 'react-hot-toast'
 
 // ─── Printer picker modal ─────────────────────────────────────────────────────
@@ -116,11 +117,12 @@ function HardwareCard({
 
 // ─── Helcim card reader ───────────────────────────────────────────────────────
 
-function HelcimReaderSection() {
-  const { data: tenant } = trpc.tenants.getCurrent.useQuery()
-  const tenantSettings = (tenant?.settings ?? {}) as Record<string, unknown>
-  const helcim = (tenantSettings.helcim ?? {}) as Record<string, string>
-  const terminalId = helcim.terminal_id ?? ''
+function HelcimReaderSection({ station, onPatch, saving }: {
+  station: Station
+  onPatch: (updater: (s: Station) => Station) => void
+  saving: boolean
+}) {
+  const terminalId = station.helcim?.terminal_id ?? ''
   const configured = !!terminalId
 
   return (
@@ -134,27 +136,24 @@ function HelcimReaderSection() {
       statusColor={configured ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}
       defaultOpen
     >
-      <HelcimReaderForm terminalId={terminalId} />
+      <HelcimReaderForm key={station.id} terminalId={terminalId} onPatch={onPatch} saving={saving} />
     </HardwareCard>
   )
 }
 
-function HelcimReaderForm({ terminalId }: { terminalId: string }) {
-  const utils = trpc.useUtils()
+function HelcimReaderForm({ terminalId, onPatch, saving }: {
+  terminalId: string
+  onPatch: (updater: (s: Station) => Station) => void
+  saving: boolean
+}) {
   const [draft, setDraft] = useState(terminalId)
   const [dirty, setDirty] = useState(false)
 
-  const update = trpc.tenants.updateSettings.useMutation({
-    onSuccess: () => {
-      utils.tenants.getCurrent.invalidate()
-      setDirty(false)
-      toast.success('Saved')
-    },
-    onError: (e) => toast.error(e.message),
-  })
+  const update = { isPending: saving }
 
   const handleSave = () => {
-    update.mutate({ settings: { helcim: { terminal_id: draft.trim() } } })
+    onPatch((s) => ({ ...s, helcim: { terminal_id: draft.trim() } }))
+    setDirty(false)
   }
 
   return (
@@ -233,16 +232,18 @@ const CONNECTION_LABELS: Record<ConnectionType, string> = {
   bluetooth:     'Bluetooth',
 }
 
-function PrinterSection({ type, label, description, defaultConnection }: {
+function PrinterSection({ type, label, description, defaultConnection, station, onPatch, saving }: {
   type: PrinterType
   label: string
   description: string
   defaultConnection?: ConnectionType
+  station: Station
+  onPatch: (updater: (s: Station) => Station) => void
+  saving: boolean
 }) {
-  const utils = trpc.useUtils()
   const { data: tenant } = trpc.tenants.getCurrent.useQuery()
   const tenantSettings = (tenant?.settings ?? {}) as Record<string, unknown>
-  const hardware = (tenantSettings.hardware ?? {}) as Record<string, unknown>
+  const hardware = (station.hardware ?? {}) as Record<string, unknown>
   const saved = (hardware[`${type}_printer`] ?? {}) as Partial<PrinterConfig>
   const savedSize = (hardware['label_size'] as LabelSize | undefined) ?? DEFAULT_LABEL_SIZE
   const [labelSize, setLabelSize] = useState<string>(
@@ -265,26 +266,23 @@ function PrinterSection({ type, label, description, defaultConnection }: {
 
   const configured = !!(saved.name || saved.ip || saved.host || saved.address)
 
-  const update = trpc.tenants.updateSettings.useMutation({
-    onSuccess: () => { utils.tenants.getCurrent.invalidate(); setDirty(false); toast.success('Saved') },
-    onError: (e) => toast.error(e.message),
-  })
+  const update = { isPending: saving }
 
   const handleSave = () => {
     const sizeVal = LABEL_SIZE_PRESETS[labelSize] ?? DEFAULT_LABEL_SIZE
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const hardwareUpdate: any = {
-      ...hardware,
-      [`${type}_printer`]: { name: name.trim(), connection, ip: ip.trim(), port: port.trim(), host: host.trim(), share: share.trim(), address: address.trim() },
-      ...(type === 'label' ? { label_size: { width_in: sizeVal.width_in, height_in: sizeVal.height_in } } : {}),
-    }
-    update.mutate({
-      settings: { hardware: hardwareUpdate },
-    })
+    onPatch((s) => ({
+      ...s,
+      hardware: {
+        ...s.hardware,
+        [`${type}_printer`]: { name: name.trim(), connection, ip: ip.trim(), port: port.trim(), host: host.trim(), share: share.trim(), address: address.trim() },
+        ...(type === 'label' ? { label_size: { width_in: sizeVal.width_in, height_in: sizeVal.height_in } } : {}),
+      },
+    }))
+    setDirty(false)
   }
 
   const handleClear = () => {
-    update.mutate({ settings: { hardware: { ...hardware, [`${type}_printer`]: {} } } })
+    onPatch((s) => ({ ...s, hardware: { ...s.hardware, [`${type}_printer`]: {} } }))
     setName(''); setIp(''); setPort('9100'); setHost(''); setShare(''); setAddress('')
     setConnection(defaultConnection ?? 'network')
     setDirty(false)
@@ -583,25 +581,125 @@ function PrinterSection({ type, label, description, defaultConnection }: {
 // ─── Main tab ─────────────────────────────────────────────────────────────────
 
 export function HardwareTab() {
+  const utils = trpc.useUtils()
+  const { data: tenant } = trpc.tenants.getCurrent.useQuery()
+
+  const [stations, setStations] = useState<Station[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [ready, setReady] = useState(false)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+
+  // Initialise from tenant settings once (migrating legacy hardware → "Front Desk")
+  useEffect(() => {
+    if (!tenant || ready) return
+    const derived = deriveStations(tenant.settings)
+    setStations(derived)
+    setSelectedId(derived[0]?.id ?? null)
+    setReady(true)
+  }, [tenant, ready])
+
+  const update = trpc.tenants.updateSettings.useMutation({
+    onSuccess: () => { utils.tenants.getCurrent.invalidate(); toast.success('Saved') },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const persist = (next: Station[]) => {
+    setStations(next)
+    update.mutate({ settings: { stations: next } })
+  }
+
+  const patchStation = (id: string, updater: (s: Station) => Station) => {
+    persist(stations.map((s) => (s.id === id ? updater(s) : s)))
+  }
+
+  const addStation = () => {
+    const id = newStationId()
+    const next = [...stations, { id, name: `Station ${stations.length + 1}` }]
+    persist(next)
+    setSelectedId(id)
+    setRenamingId(id); setRenameDraft(`Station ${stations.length + 1}`)
+  }
+
+  const deleteStation = (id: string) => {
+    const next = stations.filter((s) => s.id !== id)
+    persist(next)
+    if (selectedId === id) setSelectedId(next[0]?.id ?? null)
+  }
+
+  const commitRename = () => {
+    if (renamingId && renameDraft.trim()) {
+      patchStation(renamingId, (s) => ({ ...s, name: renameDraft.trim() }))
+    }
+    setRenamingId(null); setRenameDraft('')
+  }
+
+  const selected = stations.find((s) => s.id === selectedId) ?? null
+
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-base font-semibold text-gray-900">Hardware</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Configure printers and payment hardware connected to your store</p>
+        <h2 className="text-base font-semibold text-gray-900">Hardware &amp; Stations</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          A <strong>station</strong> is a spot in your store (e.g. front desk, delivery desk) with its own
+          printers and payment terminal. Each device picks its station at login.
+        </p>
       </div>
-      <HelcimReaderSection />
-      <PrinterSection
-        type="receipt"
-        label="Receipt Printer"
-        description="Prints customer receipts at checkout"
-        defaultConnection="network"
-      />
-      <PrinterSection
-        type="label"
-        label="Label Printer"
-        description="Prints order labels and bag tags"
-        defaultConnection="windows_share"
-      />
+
+      {/* Station tabs */}
+      <div className="flex flex-wrap items-center gap-2">
+        {stations.map((s) => (
+          <div key={s.id}
+            className={cn('flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm',
+              selectedId === s.id ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}>
+            {renamingId === s.id ? (
+              <input autoFocus value={renameDraft}
+                onChange={(e) => setRenameDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setRenamingId(null); setRenameDraft('') } }}
+                onBlur={commitRename}
+                className="w-28 rounded border border-gray-200 px-1.5 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
+            ) : (
+              <>
+                <button onClick={() => setSelectedId(s.id)} className="flex items-center gap-1.5 font-medium">
+                  <MonitorSmartphone className="h-3.5 w-3.5" /> {s.name}
+                </button>
+                <button onClick={() => { setRenamingId(s.id); setRenameDraft(s.name) }} className="text-gray-400 hover:text-brand-600"><Pencil className="h-3 w-3" /></button>
+                <button onClick={() => deleteStation(s.id)} className="text-gray-400 hover:text-red-500"><Trash2 className="h-3 w-3" /></button>
+              </>
+            )}
+          </div>
+        ))}
+        <button onClick={addStation}
+          className="flex items-center gap-1 rounded-xl border border-dashed border-gray-300 px-3 py-2 text-sm font-medium text-gray-500 hover:border-brand-400 hover:text-brand-600">
+          <Plus className="h-4 w-4" /> Add station
+        </button>
+      </div>
+
+      {stations.length === 0 && (
+        <div className="rounded-xl border border-dashed border-gray-300 p-10 text-center">
+          <MonitorSmartphone className="mx-auto h-8 w-8 text-gray-300 mb-2" />
+          <p className="text-sm font-medium text-gray-600">No stations yet</p>
+          <p className="text-xs text-gray-400 mt-1">Add a station to configure its printers and payment terminal.</p>
+        </div>
+      )}
+
+      {selected && (
+        <div className="space-y-6">
+          <HelcimReaderSection station={selected} onPatch={(u) => patchStation(selected.id, u)} saving={update.isPending} />
+          <PrinterSection
+            key={`${selected.id}-receipt`}
+            type="receipt" label="Receipt Printer"
+            description="Prints customer receipts at checkout" defaultConnection="network"
+            station={selected} onPatch={(u) => patchStation(selected.id, u)} saving={update.isPending}
+          />
+          <PrinterSection
+            key={`${selected.id}-label`}
+            type="label" label="Label Printer"
+            description="Prints order labels and bag tags" defaultConnection="windows_share"
+            station={selected} onPatch={(u) => patchStation(selected.id, u)} saving={update.isPending}
+          />
+        </div>
+      )}
     </div>
   )
 }

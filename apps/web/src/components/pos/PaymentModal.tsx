@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { formatCurrency, cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc'
 import type { Customer, TenantSettings } from '@laundry/db'
+import { useStation } from '@/components/station/StationProvider'
 import toast from 'react-hot-toast'
 
 type Method = 'card_terminal' | 'saved_card' | 'prepaid_card' | 'cash' | 'pay_on_collection' | 'invoice' | 'direct_deposit'
@@ -60,6 +61,7 @@ function resolveInitialMethod(customer: Customer | null | undefined, tenantSetti
 
 export function PaymentModal({ orderId, totalCents, discountCents = 0, promoCodeId, customer, excludeMethods, onComplete, onCancel }: Props) {
   const { data: tenant } = trpc.tenants.getCurrent.useQuery()
+  const { terminalId: stationTerminalId } = useStation()
   const tenantSettings = tenant?.settings as TenantSettings | undefined
 
   const [step, setStep]           = useState<Step>('select')
@@ -240,7 +242,7 @@ export function PaymentModal({ orderId, totalCents, discountCents = 0, promoCode
     if (method === 'cash') { setStep('cash_entry'); return }
 
     if (method === 'card_terminal') {
-      const tid = selectedTerminalId ?? terminals[0]?.terminalId?.toString()
+      const tid = selectedTerminalId ?? stationTerminalId ?? terminals[0]?.terminalId?.toString()
       if (!tid) { toast.error('No terminal selected'); return }
       chargeTerminal.mutate({ order_id: orderId, amount: grandTotal, terminal_id: tid })
       return

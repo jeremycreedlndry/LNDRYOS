@@ -7,6 +7,7 @@ import { CustomerSearch } from '@/components/pos/CustomerSearch'
 import { ServiceGrid } from '@/components/pos/ServiceGrid'
 import { OrderCart, type CartLine } from '@/components/pos/OrderCart'
 import { FulfillmentModal, type FulfillmentValue } from '@/components/pos/FulfillmentModal'
+import { useStation } from '@/components/station/StationProvider'
 import { PaymentModal } from '@/components/pos/PaymentModal'
 import { BagEntryModal } from '@/components/pos/BagEntryModal'
 import { CustomItemModal } from '@/components/pos/CustomItemModal'
@@ -318,6 +319,7 @@ function POSInner() {
   }
 
   const { data: tenantSettings } = trpc.tenants.getCurrent.useQuery()
+  const { hardware: stationHw } = useStation()
   const { data: myRole } = trpc.staff.myRole.useQuery()
   const canDelete = isEditMode && editOrder && editOrder.status !== 'cancelled'
   const utils = trpc.useUtils()
@@ -386,7 +388,7 @@ function POSInner() {
       }
       setPendingPrefs(null)
       // Print bag labels if label printer configured
-      const hw = (tenantSettings?.settings as Record<string, unknown> | null)?.hardware as Record<string, unknown> | undefined
+      const hw = stationHw as Record<string, unknown> | undefined
       const labelPrinter = (hw?.label_printer as Record<string, string> | undefined)?.name
       if (labelPrinter) {
         const storeName = tenantSettings?.name as string | undefined
@@ -586,7 +588,7 @@ function POSInner() {
     }
 
     // Print receipt if receipt printer configured
-    const hw = (tenantSettings?.settings as Record<string, unknown> | null)?.hardware as Record<string, unknown> | undefined
+    const hw = stationHw as Record<string, unknown> | undefined
     const receiptPrinter = (hw?.receipt_printer as Record<string, string> | undefined)?.name
     if (receiptPrinter && lastCreatedOrder) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

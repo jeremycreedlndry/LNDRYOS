@@ -8,6 +8,7 @@ import { MobileNav } from '@/components/layout/MobileNav'
 import { ClockInGate } from '@/components/layout/ClockInGate'
 import { EnsureTenantCookie } from '@/components/layout/EnsureTenantCookie'
 import { NayaxTapListener } from '@/components/nayax/NayaxTapListener'
+import { StationProvider } from '@/components/station/StationProvider'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerClient()
@@ -57,18 +58,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const displayName = (member.display_name as string | null) ?? ''
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar tenantName={(member.tenants as unknown as { name: string })?.name ?? ''} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <TopBar role={role} />
-        <main className="flex-1 overflow-auto pb-16 lg:pb-0">
-          {children}
-        </main>
+    <StationProvider>
+      <div className="flex h-screen overflow-hidden bg-gray-50">
+        <Sidebar tenantName={(member.tenants as unknown as { name: string })?.name ?? ''} />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <TopBar role={role} />
+          <main className="flex-1 overflow-auto pb-16 lg:pb-0">
+            {children}
+          </main>
+        </div>
+        <MobileNav />
+        <EnsureTenantCookie tenantId={member.tenant_id} />
+        <NayaxTapListener userId={user.id} tenantId={member.tenant_id} />
+        <ClockInGate role={role} displayName={displayName} />
       </div>
-      <MobileNav />
-      <EnsureTenantCookie tenantId={member.tenant_id} />
-      <NayaxTapListener userId={user.id} tenantId={member.tenant_id} />
-      <ClockInGate role={role} displayName={displayName} />
-    </div>
+    </StationProvider>
   )
 }

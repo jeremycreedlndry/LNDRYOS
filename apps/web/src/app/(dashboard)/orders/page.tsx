@@ -14,6 +14,7 @@ import { OrderDetailModal } from './OrderDetailModal'
 import { OrderIssuesModal } from '@/components/orders/OrderIssuesModal'
 import { PaymentModal } from '@/components/pos/PaymentModal'
 import { CustomerProfilePanel } from '@/components/customers/CustomerProfilePanel'
+import { useStation } from '@/components/station/StationProvider'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -589,6 +590,7 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
   const markCleanedRef = useRef<HTMLButtonElement>(null)
 
   const { data: tenant } = trpc.tenants.getCurrent.useQuery(undefined, { staleTime: 60_000 })
+  const { hardware: stationHw } = useStation()
 
   const setAssignments = trpc.equipment.setAssignments.useMutation()
 
@@ -626,7 +628,7 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
     setPendingStatus('ready')
 
     // Print bag-out labels if label printer configured
-    const hw = (tenant?.settings as Record<string, unknown> | null)?.hardware as Record<string, unknown> | undefined
+    const hw = stationHw as Record<string, unknown> | undefined
     const labelPrinter = (hw?.label_printer as Record<string, string> | undefined)?.name
     if (labelPrinter && bagCount && bagCount > 0) {
       const labelSize = hw?.label_size as LabelSize | undefined

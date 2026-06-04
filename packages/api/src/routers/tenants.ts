@@ -3,6 +3,16 @@ import { TRPCError } from '@trpc/server'
 import Stripe from 'stripe'
 import { router, tenantProcedure } from '../trpc'
 
+const printerConfigSchema = z.object({
+  name:       z.string().optional(),
+  connection: z.enum(['network', 'windows_share', 'usb', 'bluetooth']).optional(),
+  ip:         z.string().optional(),
+  port:       z.string().optional(),
+  host:       z.string().optional(),
+  share:      z.string().optional(),
+  address:    z.string().optional(),
+})
+
 export const tenantsRouter = router({
   getMembers: tenantProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
@@ -92,6 +102,18 @@ export const tenantsRouter = router({
             address:    z.string().optional(),
           }).optional(),
         }).optional(),
+        // Per-station hardware bundles (printers + label size + payment terminal).
+        // Replaces the tenant-wide `hardware`/`helcim` model; passed as a whole array.
+        stations: z.array(z.object({
+          id:   z.string(),
+          name: z.string(),
+          helcim: z.object({ terminal_id: z.string().optional() }).optional(),
+          hardware: z.object({
+            receipt_printer: printerConfigSchema.optional(),
+            label_printer:   printerConfigSchema.optional(),
+            label_size:      z.object({ width_in: z.number(), height_in: z.number() }).optional(),
+          }).optional(),
+        })).optional(),
       }).optional(),
     }))
     .mutation(async ({ ctx, input }) => {

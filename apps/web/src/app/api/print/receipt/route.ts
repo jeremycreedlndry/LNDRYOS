@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
   const taxId   = (settings.tax_id   as string | undefined) ?? ''
   const phone   = (settings.phone    as string | undefined) ?? ''
 
-  const customer = order.customer as { first_name: string; last_name: string; phone?: string | null; order_preferences?: Record<string,string> | null } | null
+  const customer = order.customer as unknown as { first_name: string; last_name: string; phone?: string | null; order_preferences?: Record<string,string> | null } | null
   const customerName = customer ? `${customer.first_name} ${customer.last_name}` : 'Walk-in'
 
   type OrderLine = { name: string; category: string; quantity: number; unit_label: string; unit_price: number }

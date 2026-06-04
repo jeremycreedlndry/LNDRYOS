@@ -60,7 +60,8 @@ export const ordersRouter = router({
           customer:customers(*),
           lines:order_lines(*),
           payments(*),
-          assignments:order_equipment_assignments(*, equipment:equipment(id, name, type))
+          assignments:order_equipment_assignments(*, equipment:equipment(id, name, type)),
+          stops:pickup_stops(id, type, status, scheduled_date, time_start, time_end)
         `)
         .eq('id', input.id)
         .eq('tenant_id', ctx.tenantId)

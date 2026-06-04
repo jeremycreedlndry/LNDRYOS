@@ -249,10 +249,33 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
   const { data: order, isLoading } = trpc.orders.getById.useQuery({ id: orderId })
   const { data: members = [] } = trpc.tenants.getMembers.useQuery()
   const { data: myRole } = trpc.staff.myRole.useQuery()
+  const utils = trpc.useUtils()
   const [emailSent, setEmailSent] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
   const [showCustomerProfile, setShowCustomerProfile] = useState<'orders' | 'edit' | null>(null)
   const [showCancelModal, setShowCancelModal] = useState(false)
+  const [addingStop, setAddingStop] = useState<'pickup' | 'delivery' | null>(null)
+  const [stopDate, setStopDate] = useState('')
+  const [stopTime, setStopTime] = useState('')
+
+  // Fetch stops linked to this order
+  const { data: allStops = [], refetch: refetchStops } = trpc.pickupStops.listByDate.useQuery(
+    { date: new Date().toISOString().split('T')[0] },
+    { enabled: false } // we'll fetch differently
+  )
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const orderStops = (order as any)?.stops ?? []
+
+  const createStop = trpc.pickupStops.createOneOff.useMutation({
+    onSuccess: () => {
+      utils.orders.getById.invalidate({ id: orderId })
+      setAddingStop(null); setStopDate(''); setStopTime('')
+      import('react-hot-toast').then(({ default: toast }) => toast.success('Stop added'))
+    },
+  })
+  const deleteStop = trpc.pickupStops.updateStatus.useMutation({
+    onSuccess: () => utils.orders.getById.invalidate({ id: orderId }),
+  })
   const notesEndRef = useRef<HTMLDivElement>(null)
   const sendReceipt = trpc.notifications.sendReceipt.useMutation({ onSuccess: () => setEmailSent('receipt') })
   const sendInvoice = trpc.notifications.sendInvoice.useMutation({ onSuccess: () => setEmailSent('invoice') })
@@ -483,6 +506,82 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
                       </tr>
                     </tfoot>
                   </table>
+                </div>
+              </Section>
+
+              {/* Pickup / Delivery stops */}
+              <Section title="Pickup & Delivery">
+                <div className="space-y-2">
+                  {orderStops.length === 0 && !addingStop && (
+                    <p className="text-xs text-gray-400">No pickup or delivery scheduled.</p>
+                  )}
+                  {orderStops.map((s: { id: string; type: string; status: string; scheduled_date: string; time_start: string | null }) => (
+                    <div key={s.id} className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                      <div>
+                        <span className={`text-xs font-semibold mr-2 ${s.type === 'pickup' ? 'text-blue-600' : 'text-purple-600'}`}>
+                          {s.type === 'pickup' ? '↑ Pickup' : '↓ Delivery'}
+                        </span>
+                        <span className="text-xs text-gray-600">
+                          {new Date(s.scheduled_date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
+                          {s.time_start ? ` at ${s.time_start.slice(0, 5)}` : ''}
+                        </span>
+                        <span className={`ml-2 text-[10px] font-medium rounded-full px-1.5 py-0.5 ${
+                          s.status === 'completed' ? 'bg-green-100 text-green-700' :
+                          s.status === 'en_route' ? 'bg-blue-100 text-blue-700' :
+                          'bg-gray-100 text-gray-500'}`}>
+                          {s.status}
+                        </span>
+                      </div>
+                      {s.status === 'pending' && (
+                        <button onClick={() => deleteStop.mutate({ id: s.id, status: 'skipped' })}
+                          className="text-gray-300 hover:text-red-500 transition-colors">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {addingStop && (
+                    <div className="rounded-lg border border-brand-200 bg-brand-50 p-3 space-y-2">
+                      <p className="text-xs font-semibold text-brand-700">{addingStop === 'pickup' ? '↑ Add Pickup' : '↓ Add Delivery'}</p>
+                      <div className="flex gap-2">
+                        <input type="date" value={stopDate} onChange={e => setStopDate(e.target.value)}
+                          className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                        <input type="time" value={stopTime} onChange={e => setStopTime(e.target.value)}
+                          className="w-24 rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => { setAddingStop(null); setStopDate(''); setStopTime('') }}
+                          className="flex-1 rounded-lg border border-gray-200 py-1.5 text-xs font-medium text-gray-600">Cancel</button>
+                        <button
+                          disabled={!stopDate || createStop.isPending}
+                          onClick={() => {
+                            if (!stopDate || !order?.customer_id) return
+                            createStop.mutate({
+                              customer_id: order.customer_id as string,
+                              order_id: orderId,
+                              type: addingStop,
+                              scheduled_date: stopDate,
+                              time_start: stopTime || null,
+                            })
+                          }}
+                          className="flex-1 rounded-lg bg-brand-600 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+                          {createStop.isPending ? 'Adding…' : 'Add'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {!addingStop && (
+                    <div className="flex gap-2">
+                      <button onClick={() => setAddingStop('pickup')}
+                        className="flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100">
+                        <Plus className="h-3 w-3" /> Pickup
+                      </button>
+                      <button onClick={() => setAddingStop('delivery')}
+                        className="flex items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-100">
+                        <Plus className="h-3 w-3" /> Delivery
+                      </button>
+                    </div>
+                  )}
                 </div>
               </Section>
 

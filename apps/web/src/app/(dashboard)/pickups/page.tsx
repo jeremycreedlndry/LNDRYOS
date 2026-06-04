@@ -78,6 +78,7 @@ function StopCard({ stop, onStatusChange }: {
   stop: {
     id: string; type: string; status: string; time_start: string | null; time_end: string | null
     customer: { id: string; first_name: string; last_name: string; phone: string | null; address_street: string | null; address_city: string | null; driver_instructions: string | null } | null
+    order: { id: string; order_number: string; status: string } | null
     zone: { name: string; color: string } | null
     driver_notes: string | null
     photo_url: string | null
@@ -102,6 +103,11 @@ function StopCard({ stop, onStatusChange }: {
           <span className={cn('text-[10px] font-semibold rounded-full px-2 py-0.5', STATUS_STYLE[stop.status] ?? '')}>
             {stop.status.replace('_', ' ')}
           </span>
+          {stop.order?.order_number && (
+            <span className="text-[10px] font-semibold font-mono rounded-full bg-gray-100 text-gray-600 px-2 py-0.5">
+              {stop.order.order_number}
+            </span>
+          )}
         </div>
         {stop.time_start && (
           <span className="text-xs text-gray-500 shrink-0">

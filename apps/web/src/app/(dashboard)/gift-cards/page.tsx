@@ -5,10 +5,12 @@ import { Search, CreditCard, User, UserPlus, Link2, CheckCircle, XCircle, AlertC
 import { trpc } from '@/lib/trpc'
 import { formatCurrency } from '@/lib/utils'
 import toast from 'react-hot-toast'
+import type { inferRouterOutputs } from '@trpc/server'
+import type { AppRouter } from '@laundry/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type LookupResult = Awaited<ReturnType<ReturnType<typeof trpc.prepaidCards.lookup.useQuery>['data']>> | undefined
+type LookupResult = inferRouterOutputs<AppRouter>['prepaidCards']['lookup']
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -38,7 +40,7 @@ function CustomerPicker({ onSelect }: { onSelect: (id: string, name: string) => 
       />
       {results && results.length > 0 && (
         <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 max-h-52 overflow-y-auto">
-          {results.map(c => (
+          {results.map((c: { id: string; first_name: string; last_name: string; phone?: string | null }) => (
             <button
               key={c.id}
               type="button"

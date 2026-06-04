@@ -57,6 +57,7 @@ const DEFAULT_PREFERENCE_OPTIONS: Required<OrderPreferenceOptions> = {
   detergent_type:   ['Store Default', 'HE', 'Sensitive', 'Fragrance Free', 'Pods'],
   fabric_softener:  ['Yes', 'No', 'Fragrance Free'],
   wash_temperature: ['Cold', 'Warm', 'Hot'],
+  dryer:            ['Low Heat', 'Medium Heat', 'High Heat', 'Hang Dry'],
 }
 
 const PAYMENT_TYPES: { value: string; label: string }[] = [

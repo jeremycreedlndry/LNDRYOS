@@ -67,7 +67,7 @@ export default function CustomersPage() {
             {query ? 'No customers found.' : 'No customers yet. Add your first one.'}
           </div>
         )}
-        {customers.map((customer) => {
+        {customers.map((customer: Customer) => {
           const name = [customer.first_name, customer.last_name].filter(Boolean).join(' ')
           const initials = [customer.first_name[0], customer.last_name?.[0]].filter(Boolean).join('').toUpperCase()
           return (

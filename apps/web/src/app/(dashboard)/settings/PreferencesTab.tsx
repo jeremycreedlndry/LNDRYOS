@@ -156,6 +156,7 @@ export function PreferencesTab() {
     detergent_type:   [],
     fabric_softener:  [],
     wash_temperature: [],
+    dryer:            [],
   })
 
   useEffect(() => {
@@ -167,6 +168,7 @@ export function PreferencesTab() {
       detergent_type:   existing?.detergent_type   ?? PREF_CATEGORIES.find((c) => c.key === 'detergent_type')!.defaults,
       fabric_softener:  existing?.fabric_softener  ?? PREF_CATEGORIES.find((c) => c.key === 'fabric_softener')!.defaults,
       wash_temperature: existing?.wash_temperature ?? PREF_CATEGORIES.find((c) => c.key === 'wash_temperature')!.defaults,
+      dryer:            existing?.dryer            ?? [],
     })
     setReady(true)
   }, [tenant, ready])

@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   if (event.type === 'cardTransaction' && event.id) {
     try {
       const txn = await getTransaction(event.id)
-      const invoiceNumber = (txn as Record<string, unknown>).invoiceNumber as string | undefined
+      const invoiceNumber = (txn as unknown as Record<string, unknown>).invoiceNumber as string | undefined
 
       if (!invoiceNumber) {
         console.warn('[helcim webhook] cardTransaction missing invoiceNumber', event.id)

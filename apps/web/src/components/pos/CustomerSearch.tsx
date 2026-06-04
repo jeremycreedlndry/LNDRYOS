@@ -105,7 +105,7 @@ export function CustomerSearch({ selected, onSelect }: Props) {
             {!isLoading && results?.length === 0 && (
               <div className="px-4 py-3 text-sm text-gray-500">No customers found.</div>
             )}
-            {results?.map((customer) => (
+            {results?.map((customer: Customer) => (
               <button
                 key={customer.id}
                 className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"

@@ -227,6 +227,14 @@ function POSInner() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [lastCreatedOrder, setLastCreatedOrder] = useState<any>(null)
 
+  // Order type: in_store | +delivery | +pickup | +both
+  type OrderType = 'in_store' | 'delivery' | 'pickup' | 'both'
+  const [orderType, setOrderType] = useState<OrderType>('in_store')
+  const [deliveryDate, setDeliveryDate] = useState('')
+  const [deliveryTime, setDeliveryTime] = useState('')
+  const [pickupDate, setPickupDate] = useState('')
+  const [pickupTime, setPickupTime] = useState('')
+
   const handleCartDiscountChange = (cents: number, promoCodeId?: string) => {
     setCartDiscountCents(cents)
     setCartPromoCodeId(promoCodeId)
@@ -256,6 +264,18 @@ function POSInner() {
     }))
     setCartLines(lines)
     if (editOrder.customer) setCustomer(editOrder.customer as Customer)
+
+    // Pre-fill the fulfillment selector from the order's existing pending stops
+    const stops = ((editOrder as { stops?: { type: string; status: string; scheduled_date: string; time_start: string | null }[] }).stops) ?? []
+    const pendingPickup   = stops.find((s) => s.type === 'pickup'   && s.status === 'pending')
+    const pendingDelivery = stops.find((s) => s.type === 'delivery' && s.status === 'pending')
+    if (pendingPickup && pendingDelivery) setOrderType('both')
+    else if (pendingPickup)               setOrderType('pickup')
+    else if (pendingDelivery)             setOrderType('delivery')
+    else                                  setOrderType('in_store')
+    if (pendingPickup)   { setPickupDate(pendingPickup.scheduled_date);     setPickupTime(pendingPickup.time_start?.slice(0, 5) ?? '') }
+    if (pendingDelivery) { setDeliveryDate(pendingDelivery.scheduled_date); setDeliveryTime(pendingDelivery.time_start?.slice(0, 5) ?? '') }
+
     setInitialized(true)
   }, [editOrder, initialized])
 
@@ -293,6 +313,9 @@ function POSInner() {
     : 0
 
   const saveCustomerPrefs = trpc.customers.update.useMutation()
+  const createStop = trpc.pickupStops.createOneOff.useMutation()
+  const patchStop  = trpc.pickupStops.patchStop.useMutation()
+  const skipStop   = trpc.pickupStops.updateStatus.useMutation()
 
   const createOrder = trpc.orders.create.useMutation({
     onSuccess: (order) => {
@@ -326,18 +349,53 @@ function POSInner() {
           lines: (order.lines as Array<{ name: string; category: string; notes?: string | null }>),
         }, storeName).catch((e) => console.warn('[label print]', e))
       }
+
+      // Create pickup/delivery stops if order type requires them
+      if (customer?.id && orderType !== 'in_store') {
+        const stopBase = { customer_id: customer.id, order_id: order.id as string }
+        if (orderType === 'pickup' || orderType === 'both') {
+          createStop.mutate({ ...stopBase, type: 'pickup', scheduled_date: pickupDate || (order.due_date as string), time_start: pickupTime || null })
+        }
+        if (orderType === 'delivery' || orderType === 'both') {
+          createStop.mutate({ ...stopBase, type: 'delivery', scheduled_date: deliveryDate || (order.due_date as string), time_start: deliveryTime || null })
+        }
+      }
     },
     onError: (e) => toast.error(e.message),
   })
 
   const updateOrder = trpc.orders.updateOrder.useMutation({
-    onSuccess: () => {
-      utils.orders.list.invalidate()
-      toast.success('Order updated')
-      router.push('/orders')
-    },
     onError: (e) => toast.error(e.message),
   })
+
+  // Reconcile pickup/delivery stops on an existing order to match the selected order type.
+  // Adds a newly-wanted stop, patches date/time on an existing one, or skips one no longer wanted.
+  const reconcileStops = async (orderId: string, customerId: string) => {
+    const stops = ((editOrder as { stops?: { id: string; type: string; status: string; scheduled_date: string; time_start: string | null }[] })?.stops) ?? []
+    const pendingPickup   = stops.find((s) => s.type === 'pickup'   && s.status === 'pending')
+    const pendingDelivery = stops.find((s) => s.type === 'delivery' && s.status === 'pending')
+    const wantPickup   = orderType === 'pickup'   || orderType === 'both'
+    const wantDelivery = orderType === 'delivery' || orderType === 'both'
+    const fallbackDate = ((editOrder as { due_date?: string })?.due_date) || new Date().toISOString().split('T')[0]
+
+    // Pickup
+    if (wantPickup && !pendingPickup) {
+      await createStop.mutateAsync({ customer_id: customerId, order_id: orderId, type: 'pickup', scheduled_date: pickupDate || fallbackDate, time_start: pickupTime || null })
+    } else if (wantPickup && pendingPickup) {
+      await patchStop.mutateAsync({ id: pendingPickup.id, scheduled_date: pickupDate || pendingPickup.scheduled_date, time_start: pickupTime || null })
+    } else if (!wantPickup && pendingPickup) {
+      await skipStop.mutateAsync({ id: pendingPickup.id, status: 'skipped' })
+    }
+
+    // Delivery
+    if (wantDelivery && !pendingDelivery) {
+      await createStop.mutateAsync({ customer_id: customerId, order_id: orderId, type: 'delivery', scheduled_date: deliveryDate || fallbackDate, time_start: deliveryTime || null })
+    } else if (wantDelivery && pendingDelivery) {
+      await patchStop.mutateAsync({ id: pendingDelivery.id, scheduled_date: deliveryDate || pendingDelivery.scheduled_date, time_start: deliveryTime || null })
+    } else if (!wantDelivery && pendingDelivery) {
+      await skipStop.mutateAsync({ id: pendingDelivery.id, status: 'skipped' })
+    }
+  }
 
   const loadGiftCard = trpc.nayax.loadGiftCard.useMutation()
 
@@ -395,9 +453,9 @@ function POSInner() {
     notes: l.notes ?? null,
   }))
 
-  const handleCheckout = useCallback(() => {
+  const handleCheckout = useCallback(async () => {
     if (isEditMode && editOrderId) {
-      updateOrder.mutate({
+      await updateOrder.mutateAsync({
         id: editOrderId,
         customer_id: customer?.id ?? null,
         customer_name: customer ? `${customer.first_name} ${customer.last_name}` : null,
@@ -405,6 +463,13 @@ function POSInner() {
         tax_rate: taxRate,
         delivery_fee_cents: customerDeliveryFee,
       })
+      if (customer?.id) {
+        try { await reconcileStops(editOrderId, customer.id) }
+        catch (e) { toast.error(e instanceof Error ? e.message : 'Failed to update delivery/pickup') }
+      }
+      utils.orders.list.invalidate()
+      toast.success('Order updated')
+      router.push('/orders')
     } else {
       const defaultDueDays = (tenantSettings?.settings as Record<string, unknown> | null)?.default_due_days as number | undefined ?? 2
       const dueDate = new Date()
@@ -418,7 +483,7 @@ function POSInner() {
         delivery_fee_cents: customerDeliveryFee,
       })
     }
-  }, [customer, cartLines, taxRate, createOrder, updateOrder, isEditMode, editOrderId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [customer, cartLines, taxRate, createOrder, updateOrder, isEditMode, editOrderId, orderType, pickupDate, pickupTime, deliveryDate, deliveryTime, editOrder]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePaymentComplete = useCallback(async () => {
     // Load funds onto any physical gift cards in the order
@@ -474,6 +539,8 @@ function POSInner() {
     setCartLines([])
     setCustomer(null)
     setLastCreatedOrder(null)
+    setOrderType('in_store')
+    setDeliveryDate(''); setDeliveryTime(''); setPickupDate(''); setPickupTime('')
     if (physicalGiftCards.length === 0) toast.success('Order complete!')
   }, [cartLines, paymentOrderNumber, loadGiftCard, lastCreatedOrder, tenantSettings, taxRate])
 
@@ -520,6 +587,60 @@ function POSInner() {
             </div>
             <CustomerSearch selected={customer} onSelect={handleSelectCustomer} />
           </div>
+
+          {/* Order type selector */}
+          {(
+            <div>
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Order Type</h2>
+              <div className="grid grid-cols-4 gap-1.5 mb-2">
+                {([
+                  { value: 'in_store', label: 'In-Store' },
+                  { value: 'delivery', label: '+ Delivery' },
+                  { value: 'pickup',   label: '+ Pickup' },
+                  { value: 'both',     label: 'Pickup & Delivery' },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setOrderType(opt.value)}
+                    className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors text-center ${
+                      orderType === opt.value
+                        ? 'border-brand-500 bg-brand-50 text-brand-700'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >{opt.label}</button>
+                ))}
+              </div>
+              {(orderType === 'pickup' || orderType === 'both') && (
+                <div className="flex gap-2 mb-2">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-medium text-gray-500 block mb-1">Pickup Date</label>
+                    <input type="date" value={pickupDate} onChange={e => setPickupDate(e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                  </div>
+                  <div className="w-24">
+                    <label className="text-[10px] font-medium text-gray-500 block mb-1">Time</label>
+                    <input type="time" value={pickupTime} onChange={e => setPickupTime(e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                  </div>
+                </div>
+              )}
+              {(orderType === 'delivery' || orderType === 'both') && (
+                <div className="flex gap-2 mb-2">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-medium text-gray-500 block mb-1">Delivery Date</label>
+                    <input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                  </div>
+                  <div className="w-24">
+                    <label className="text-[10px] font-medium text-gray-500 block mb-1">Time</label>
+                    <input type="time" value={deliveryTime} onChange={e => setDeliveryTime(e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Services</h2>
             <ServiceGrid onAddItem={handleAddItem} onCustomItem={() => setCustomItemOpen(true)}

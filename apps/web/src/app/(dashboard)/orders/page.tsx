@@ -679,7 +679,9 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
               {order.order_number}
             </button>
             {isLate(order) && (
-              <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0" title="Overdue" />
+              <span title="Overdue" className="inline-flex shrink-0">
+                <AlertCircle className="h-3.5 w-3.5 text-red-500" />
+              </span>
             )}
           </div>
           <p className="text-xs text-gray-400 mt-0.5">

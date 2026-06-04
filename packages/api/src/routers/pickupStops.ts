@@ -315,6 +315,7 @@ export const pickupStopsRouter = router({
       driver_user_id: z.string().uuid().nullable().optional(),
       order_id:       z.string().uuid().nullable().optional(),
       notes:          z.string().nullable().optional(),
+      bag_count:      z.number().int().min(0).nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase

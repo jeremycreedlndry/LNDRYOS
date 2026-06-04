@@ -54,7 +54,9 @@ function mapsUrl(stop: {
 }
 
 // ─── Pickup-after-delivery prompt ────────────────────────────────────────────
-function PickupPromptModal({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
+function PickupPromptModal({ onYes, onNo }: { onYes: (bagCount: number | null, note: string) => void; onNo: () => void }) {
+  const [bags, setBags] = useState('')
+  const [note, setNote] = useState('')
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 bg-black/50">
       <div className="w-full max-w-sm bg-white rounded-2xl overflow-hidden">
@@ -68,15 +70,28 @@ function PickupPromptModal({ onYes, onNo }: { onYes: () => void; onNo: () => voi
               <p className="text-sm text-gray-500">While you're at this address</p>
             </div>
           </div>
-          <p className="text-sm text-gray-600 mb-5">
+          <p className="text-sm text-gray-600 mb-4">
             Is there laundry to pick up from this customer while you're here?
           </p>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Bags picked up (optional)</label>
+          <input
+            type="number" inputMode="numeric" min={0} value={bags}
+            onChange={(e) => setBags(e.target.value)}
+            placeholder="e.g. 2"
+            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Note for store (optional)</label>
+          <textarea
+            value={note} onChange={(e) => setNote(e.target.value)} rows={2}
+            placeholder="e.g. delicates, comforter…"
+            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm mb-5 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
           <div className="flex gap-3">
             <button onClick={onNo}
               className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm">
               No, skip
             </button>
-            <button onClick={onYes}
+            <button onClick={() => onYes(bags.trim() ? parseInt(bags) : null, note.trim())}
               className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-semibold text-sm">
               Yes, pick up
             </button>
@@ -352,7 +367,7 @@ function StopDetailInner() {
 
   const createPickupStop = trpc.pickupStops.createOneOff.useMutation({
     onSuccess: () => {
-      toast.success('Delivery complete — pickup stop created for today!')
+      toast.success('Picked up — order sent to Detail for weighing')
       router.push(backHref)
     },
     onError: () => {
@@ -360,19 +375,43 @@ function StopDetailInner() {
       router.push(backHref)
     },
   })
+  const createPickupOrder = trpc.orders.createPickup.useMutation()
 
-  const handlePickupYes = () => {
+  const handlePickupYes = async (bagCount: number | null, note: string) => {
     setShowPickupPrompt(false)
     const customer = stop.customer as { id: string } | null
-    if (customer?.id) {
+    if (!customer?.id) {
+      toast.success('Delivery complete!')
+      router.push(backHref)
+      return
+    }
+    const today = new Date().toISOString().split('T')[0]
+    const detail = [
+      'Picked up by driver during delivery',
+      bagCount != null ? `${bagCount} bag${bagCount === 1 ? '' : 's'}` : null,
+      note || null,
+    ].filter(Boolean).join(' — ')
+    try {
+      // 1) Create a pending order in the "Detail" queue so the picked-up items
+      //    can be weighed and detailed when they get back to the store.
+      const order = await createPickupOrder.mutateAsync({
+        customer_id: customer.id,
+        scheduled_date: today,
+        notes: detail,
+        skip_stop: true, // we create the (already-completed) stop ourselves below
+      })
+      // 2) Record the pickup as already completed, linked to that order.
       createPickupStop.mutate({
         customer_id: customer.id,
         type: 'pickup',
-        scheduled_date: new Date().toISOString().split('T')[0],
+        scheduled_date: today,
         zone_id: stop.zone_id as string ?? null,
-        notes: 'Pickup flagged by driver during delivery',
+        order_id: order.id as string,
+        status: 'completed',
+        bag_count: bagCount,
+        notes: detail,
       })
-    } else {
+    } catch {
       toast.success('Delivery complete!')
       router.push(backHref)
     }

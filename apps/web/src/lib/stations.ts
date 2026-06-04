@@ -56,7 +56,9 @@ export function newStationId(): string {
   return `station-${Math.random().toString(36).slice(2, 10)}`
 }
 
-// Per-device persistence of the chosen station
+// Per-device persistence of the chosen station (localStorage → survives new
+// windows and logins on the same computer).
 export const ACTIVE_STATION_KEY = 'lndryos_active_station_id'
-// Per-session flag so we prompt for the station once per login
-export const STATION_PROMPTED_KEY = 'lndryos_station_prompted'
+// Whether this device has ever picked a station (so we prompt only once per
+// computer, not once per window). Covers the "No hardware on this device" choice.
+export const STATION_CHOSEN_KEY = 'lndryos_station_chosen'

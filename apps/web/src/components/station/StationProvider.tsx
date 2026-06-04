@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { MonitorSmartphone, Printer, X } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import {
-  deriveStations, ACTIVE_STATION_KEY, STATION_PROMPTED_KEY,
+  deriveStations, ACTIVE_STATION_KEY, STATION_CHOSEN_KEY,
   type Station, type StationHardware,
 } from '@/lib/stations'
 
@@ -42,17 +42,18 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
     setLoaded(true)
   }, [])
 
-  // Prompt for a station once per login session (when any stations are configured)
+  // Prompt only until this device has picked a station once (persists across
+  // windows + logins on the same computer).
   useEffect(() => {
     if (!loaded || stations.length === 0) return
-    if (!sessionStorage.getItem(STATION_PROMPTED_KEY)) setPicker(true)
+    if (!localStorage.getItem(STATION_CHOSEN_KEY)) setPicker(true)
   }, [loaded, stations.length])
 
   const setStation = (id: string | null) => {
     setActiveId(id)
     if (id) localStorage.setItem(ACTIVE_STATION_KEY, id)
     else localStorage.removeItem(ACTIVE_STATION_KEY)
-    sessionStorage.setItem(STATION_PROMPTED_KEY, '1')
+    localStorage.setItem(STATION_CHOSEN_KEY, '1')
     setPicker(false)
   }
 
@@ -75,7 +76,7 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
           stations={stations}
           currentId={activeId}
           onPick={setStation}
-          onClose={() => { sessionStorage.setItem(STATION_PROMPTED_KEY, '1'); setPicker(false) }}
+          onClose={() => setPicker(false)}
         />
       )}
     </StationContext.Provider>

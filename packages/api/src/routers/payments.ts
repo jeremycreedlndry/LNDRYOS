@@ -117,6 +117,22 @@ export const paymentsRouter = router({
       // the transaction after Helcim returns 202 with an empty body
       const invoiceNumber = idempotencyKey  // same value: order_id without dashes
 
+      // ── TEST MODE ── bypass the physical terminal: record the payment as paid
+      // immediately (no card charged). Enabled only when PAYMENTS_TEST_MODE=true
+      // (set on staging only — never production).
+      if (process.env.PAYMENTS_TEST_MODE === 'true') {
+        const payment = await recordPayment(ctx.supabase, {
+          tenantId:            ctx.tenantId,
+          orderId:             input.order_id,
+          amount:              input.amount,
+          method:              'card_present',
+          status:              'paid',
+          processedBy:         ctx.userId,
+          helcimTransactionId: `TEST-${invoiceNumber}`,
+        })
+        return { ...payment, helcim_transaction_id: `TEST-${invoiceNumber}`, initial_status: 'APPROVED' }
+      }
+
       try {
         await purchaseWithTerminal({
           amountCents:    input.amount,

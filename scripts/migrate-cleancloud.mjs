@@ -24,8 +24,8 @@ const CC_API_TOKEN = process.env.CC_API_TOKEN
 const CC_BASE_URL  = 'https://cleancloudapp.com/api'
 
 const SUPABASE_URL = 'https://xcmldvthynocxnkehpdc.supabase.co'
-const SERVICE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhjbWxkdnRoeW5vY3hua2VocGRjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODY5MDc0NCwiZXhwIjoyMDk0MjY2NzQ0fQ.CEH9TZUqDYlAw-7uF7glpBFqYVYWGG4VmJF20Bj9ti8'
-const TENANT_ID    = 'f91d69a7-ddf8-4ed4-b1c3-555fd3004d0f'
+const SERVICE_KEY  = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhjbWxkdnRoeW5vY3hua2VocGRjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODY5MDc0NCwiZXhwIjoyMDk0MjY2NzQ0fQ.CEH9TZUqDYlAw-7uF7glpBFqYVYWGG4VmJF20Bj9ti8'
+const TENANT_ID    = process.env.TENANT_ID || 'f91d69a7-ddf8-4ed4-b1c3-555fd3004d0f'
 // System user UUID — used as created_by for migrated orders (The LNDRY Co. admin)
 const SYSTEM_USER  = 'a80e990f-3b54-495f-863e-100287cb5291'
 

@@ -71,6 +71,13 @@ export default function AdminPage() {
                     <div className="min-w-0">
                       <p className="font-medium text-gray-900 truncate">{s.name}</p>
                       <p className="text-xs text-gray-400">{s.slug} · {new Date(s.created_at).toLocaleDateString('en-CA')}</p>
+                      <button
+                        onClick={() => { navigator.clipboard?.writeText(s.id); toast.success('Store ID copied') }}
+                        className="font-mono text-[10px] text-gray-400 hover:text-brand-600"
+                        title="Click to copy full ID"
+                      >
+                        {s.id}
+                      </button>
                     </div>
                   </div>
                 </td>
@@ -133,6 +140,7 @@ export default function AdminPage() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-600 truncate">{s.name}</p>
                   <p className="text-xs text-gray-400">{s.slug} · {s.customer_count} customers · {s.order_count} orders</p>
+                  <p className="font-mono text-[10px] text-gray-400">{s.id}</p>
                 </div>
                 <button
                   onClick={() => setStatus.mutate({ tenant_id: s.id, status: 'active' })}

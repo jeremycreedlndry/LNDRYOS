@@ -19,8 +19,10 @@ import { businessAccountsRouter } from './routers/businessAccounts'
 import { invoicesRouter } from './routers/invoices'
 import { prepaidCardsRouter } from './routers/prepaidCards'
 import { promoCodesRouter } from './routers/promoCodes'
+import { adminRouter } from './routers/admin'
 
 export const appRouter = router({
+  admin: adminRouter,
   customers: customersRouter,
   catalog: catalogRouter,
   orders: ordersRouter,
@@ -45,3 +47,4 @@ export const appRouter = router({
 
 export type AppRouter = typeof appRouter
 export * from './trpc'
+export { isPlatformAdmin } from './lib/platformAdmin'

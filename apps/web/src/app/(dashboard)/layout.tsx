@@ -9,6 +9,9 @@ import { ClockInGate } from '@/components/layout/ClockInGate'
 import { EnsureTenantCookie } from '@/components/layout/EnsureTenantCookie'
 import { NayaxTapListener } from '@/components/nayax/NayaxTapListener'
 import { StationProvider } from '@/components/station/StationProvider'
+import { isPlatformAdmin } from '@laundry/api'
+import Link from 'next/link'
+import { ShieldCheck } from 'lucide-react'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerClient()
@@ -52,16 +55,42 @@ export default async function DashboardLayout({ children }: { children: React.Re
     member = (members ?? [])[0] ?? null
   }
 
-  if (!member) redirect('/onboarding')
+  const platformAdmin = isPlatformAdmin(user.email)
+
+  // Master admin can view any store (even without a membership row) via the tenant_id cookie
+  if (!member && platformAdmin && tenantIdFromCookie) {
+    const { data: t } = await service.from('tenants').select('name, slug, status').eq('id', tenantIdFromCookie).single()
+    if (t) {
+      member = { tenant_id: tenantIdFromCookie, role: 'owner', display_name: 'Master Admin', tenants: t } as typeof member
+    }
+  }
+
+  if (!member) {
+    // Platform admin with no store selected → send to the admin console
+    if (platformAdmin) redirect('/admin')
+    redirect('/onboarding')
+  }
 
   const role        = (member.role        as string) ?? 'staff'
   const displayName = (member.display_name as string | null) ?? ''
+  const storeName   = (member.tenants as unknown as { name: string })?.name ?? ''
 
   return (
     <StationProvider>
       <div className="flex h-screen overflow-hidden bg-gray-50">
         <Sidebar tenantName={(member.tenants as unknown as { name: string })?.name ?? ''} />
         <div className="flex flex-1 flex-col overflow-hidden">
+          {platformAdmin && (
+            <div className="flex items-center justify-between gap-2 bg-amber-500 px-4 py-1.5 text-xs font-medium text-white">
+              <span className="flex items-center gap-1.5">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Master Admin — viewing <strong>{storeName}</strong>
+              </span>
+              <Link href="/admin" className="rounded-md bg-white/20 px-2 py-0.5 font-semibold hover:bg-white/30">
+                Back to Admin
+              </Link>
+            </div>
+          )}
           <TopBar role={role} />
           <main className="flex-1 overflow-auto pb-16 lg:pb-0">
             {children}

@@ -30,30 +30,39 @@ export function useStation(): StationContextValue {
 
 export function StationProvider({ children }: { children: React.ReactNode }) {
   const { data: tenant } = trpc.tenants.getCurrent.useQuery()
+  const tenantId = tenant?.id ?? null
   const stations = useMemo(() => deriveStations(tenant?.settings), [tenant?.settings])
 
+  // Storage is scoped PER TENANT — a station chosen for one store must not carry
+  // over to another (e.g. master-admin switching stores, or shared device).
+  const activeKey = tenantId ? `${ACTIVE_STATION_KEY}:${tenantId}` : null
+  const chosenKey = tenantId ? `${STATION_CHOSEN_KEY}:${tenantId}` : null
+
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [loaded, setLoaded] = useState(false)
   const [picker, setPicker] = useState(false)
 
-  // Load the device's saved station once
+  // (Re)load this device's saved station whenever the tenant changes
   useEffect(() => {
-    setActiveId(localStorage.getItem(ACTIVE_STATION_KEY))
-    setLoaded(true)
-  }, [])
+    if (!activeKey) return
+    setActiveId(localStorage.getItem(activeKey))
+  }, [activeKey])
 
-  // Prompt only until this device has picked a station once (persists across
-  // windows + logins on the same computer).
+  // Prompt once per (device × tenant) — or again if the saved station no longer
+  // exists for this tenant (e.g. it was deleted).
   useEffect(() => {
-    if (!loaded || stations.length === 0) return
-    if (!localStorage.getItem(STATION_CHOSEN_KEY)) setPicker(true)
-  }, [loaded, stations.length])
+    if (!tenantId || !chosenKey || stations.length === 0) return
+    const chosen = localStorage.getItem(chosenKey)
+    const saved = localStorage.getItem(activeKey!)
+    const savedStillValid = saved && stations.some((s) => s.id === saved)
+    if (!chosen || (saved && !savedStillValid)) setPicker(true)
+  }, [tenantId, chosenKey, activeKey, stations])
 
   const setStation = (id: string | null) => {
     setActiveId(id)
-    if (id) localStorage.setItem(ACTIVE_STATION_KEY, id)
-    else localStorage.removeItem(ACTIVE_STATION_KEY)
-    localStorage.setItem(STATION_CHOSEN_KEY, '1')
+    if (!activeKey || !chosenKey) return
+    if (id) localStorage.setItem(activeKey, id)
+    else localStorage.removeItem(activeKey)
+    localStorage.setItem(chosenKey, '1')
     setPicker(false)
   }
 

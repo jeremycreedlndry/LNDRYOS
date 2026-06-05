@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { ExternalLink, Store } from 'lucide-react'
+import { ExternalLink, Store, Trash2, RotateCcw } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -33,11 +33,14 @@ export default function AdminPage() {
     router.push('/pos')
   }
 
+  const active = stores.filter((s) => s.status !== 'cancelled')
+  const deleted = stores.filter((s) => s.status === 'cancelled')
+
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Stores</h1>
-        <p className="text-sm text-gray-500 mt-0.5">{stores.length} registered store{stores.length === 1 ? '' : 's'}</p>
+        <p className="text-sm text-gray-500 mt-0.5">{active.length} active store{active.length === 1 ? '' : 's'}{deleted.length ? ` · ${deleted.length} deleted` : ''}</p>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -57,10 +60,10 @@ export default function AdminPage() {
             {isLoading && (
               <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>
             )}
-            {!isLoading && stores.length === 0 && (
+            {!isLoading && active.length === 0 && (
               <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No stores.</td></tr>
             )}
-            {stores.map((s) => (
+            {active.map((s) => (
               <tr key={s.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
@@ -105,6 +108,13 @@ export default function AdminPage() {
                     >
                       <ExternalLink className="h-3 w-3" /> Open
                     </button>
+                    <button
+                      onClick={() => { if (confirm(`Delete "${s.name}"? It will be archived (reversible).`)) setStatus.mutate({ tenant_id: s.id, status: 'cancelled' }) }}
+                      className="rounded-lg border border-red-200 px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
+                      title="Soft delete (archive)"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -112,6 +122,29 @@ export default function AdminPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Deleted / archived stores */}
+      {deleted.length > 0 && (
+        <div className="mt-8">
+          <h2 className="mb-2 text-sm font-semibold text-gray-500">Deleted ({deleted.length})</h2>
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {deleted.map((s) => (
+              <div key={s.id} className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5 last:border-0">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-600 truncate">{s.name}</p>
+                  <p className="text-xs text-gray-400">{s.slug} · {s.customer_count} customers · {s.order_count} orders</p>
+                </div>
+                <button
+                  onClick={() => setStatus.mutate({ tenant_id: s.id, status: 'active' })}
+                  className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" /> Restore
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

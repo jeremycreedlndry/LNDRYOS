@@ -49,6 +49,12 @@ export default function LoginPage() {
         document.cookie = `tenant_id=${member.tenant_id}; path=/; max-age=31536000`
       }
 
+      // Re-prompt for the station on each login (clears the per-device "chosen"
+      // flags). New windows of an active session don't hit login, so they won't nag.
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith('lndryos_station_chosen'))
+        .forEach((k) => localStorage.removeItem(k))
+
       router.push('/pos')
     } catch (err: unknown) {
       toast.error((err as Error).message ?? 'Login failed')

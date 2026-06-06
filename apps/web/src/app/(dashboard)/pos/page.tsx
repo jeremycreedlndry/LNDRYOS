@@ -11,6 +11,8 @@ import { useStation } from '@/components/station/StationProvider'
 import { PaymentModal } from '@/components/pos/PaymentModal'
 import { BagEntryModal } from '@/components/pos/BagEntryModal'
 import { CustomItemModal } from '@/components/pos/CustomItemModal'
+import { WaiverModal } from '@/components/pos/WaiverModal'
+import { WaiverQRModal } from '@/components/pos/WaiverQRModal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CancelOrderModal } from '@/components/orders/CancelOrderModal'
@@ -235,6 +237,9 @@ function POSInner() {
   const [pendingPrefs, setPendingPrefs] = useState<Record<string, string> | null>(null)
   const [mobileCartOpen, setMobileCartOpen] = useState(false)
   const [customItemOpen, setCustomItemOpen] = useState(false)
+  // Waiver flow
+  const [waiverLineKey, setWaiverLineKey] = useState<string | null>(null)
+  const [waiverOrderId, setWaiverOrderId] = useState<string | null>(null)
   const [initialized, setInitialized] = useState(false)
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cartDiscountCents, setCartDiscountCents] = useState(0)
@@ -368,11 +373,20 @@ function POSInner() {
 
   const createOrder = trpc.orders.create.useMutation({
     onSuccess: (order) => {
-      setPaymentOrderId(order.id as string)
-      setPaymentOrderNumber(order.order_number as string)
       setOrderTotal(order.total_amount as number)
       setLastCreatedOrder(order)
       setMobileCartOpen(false)
+      // If any lines need waivers, show the QR modal first — payment follows after
+      const hasWaivers = cartLines.some((l) => l.waiver_required)
+      if (hasWaivers) {
+        setWaiverOrderId(order.id as string)
+        // Store payment details so we can show the modal after the waiver is dismissed
+        setPaymentOrderId(order.id as string)
+        setPaymentOrderNumber(order.order_number as string)
+      } else {
+        setPaymentOrderId(order.id as string)
+        setPaymentOrderNumber(order.order_number as string)
+      }
       // Save order preferences back to customer profile so they persist
       if (customer?.id && pendingPrefs && Object.keys(pendingPrefs).length > 0) {
         saveCustomerPrefs.mutate({
@@ -500,6 +514,8 @@ function POSInner() {
     unit_price: l.unit_price,
     unit_label: l.unit_label,
     notes: l.notes ?? null,
+    waiver_required: l.waiver_required ?? false,
+    waiver_text: l.waiver_text ?? null,
   }))
 
   const handleCheckout = useCallback(async () => {
@@ -708,7 +724,8 @@ function POSInner() {
             onRemoveLine={(key) => setCartLines((prev) => prev.filter((l) => l.key !== key))}
             onCheckout={handleCheckout} isSubmitting={isSubmitting}
             checkoutLabel={isEditMode ? 'Save Changes' : isEmptyPickup ? 'Create Pickup Order' : undefined}
-            onDiscountChange={handleCartDiscountChange} />
+            onDiscountChange={handleCartDiscountChange}
+            onWaiverClick={(key) => setWaiverLineKey(key)} />
         </div>
       </div>
 
@@ -791,7 +808,7 @@ function POSInner() {
           onCancel={() => setGiftCardPrompt(null)} />
       )}
 
-      {paymentOrderId && (
+      {paymentOrderId && !waiverOrderId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
             <h2 className="mb-4 text-lg font-bold text-gray-900">Payment</h2>
@@ -825,6 +842,32 @@ function POSInner() {
         <CustomItemModal
           onAdd={(line) => setCartLines((prev) => [...prev, line])}
           onClose={() => setCustomItemOpen(false)}
+        />
+      )}
+
+      {/* Waiver template picker — shown when staff clicks "Add waiver" on a line */}
+      {waiverLineKey && (
+        <WaiverModal
+          itemName={cartLines.find((l) => l.key === waiverLineKey)?.name ?? 'Item'}
+          onConfirm={(waiverText) => {
+            setCartLines((prev) =>
+              prev.map((l) =>
+                l.key === waiverLineKey
+                  ? { ...l, waiver_required: true, waiver_text: waiverText }
+                  : l
+              )
+            )
+            setWaiverLineKey(null)
+          }}
+          onCancel={() => setWaiverLineKey(null)}
+        />
+      )}
+
+      {/* Waiver QR modal — shown after order created, before payment, when waivers present */}
+      {waiverOrderId && (
+        <WaiverQRModal
+          orderId={waiverOrderId}
+          onClose={() => setWaiverOrderId(null)}
         />
       )}
     </>

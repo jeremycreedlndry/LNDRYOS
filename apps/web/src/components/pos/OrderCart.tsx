@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Minus, Plus, Trash2, Tag, X } from 'lucide-react'
+import { Minus, Plus, Trash2, Tag, X, AlertTriangle, CheckCircle } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { trpc } from '@/lib/trpc'
@@ -19,6 +19,9 @@ export interface CartLine {
   // Physical gift cards only — set after Nayax card lookup
   gift_card_display_number?: string
   gift_card_uid?: string        // Nayax CardUniqueIdentifier
+  // Care-instruction override waiver
+  waiver_required?: boolean
+  waiver_text?: string
 }
 
 interface Props {
@@ -33,6 +36,7 @@ interface Props {
   isSubmitting: boolean
   checkoutLabel?: string
   onDiscountChange?: (cents: number, promoCodeId?: string) => void
+  onWaiverClick?: (key: string) => void
   // When true, the order can be checked out with no items (e.g. a pickup —
   // laundry isn't collected yet, so it becomes a $0 pending "Detail" order).
   allowEmpty?: boolean
@@ -50,6 +54,7 @@ export function OrderCart({
   isSubmitting,
   checkoutLabel,
   onDiscountChange,
+  onWaiverClick,
   allowEmpty = false,
 }: Props) {
   const subtotal = lines.reduce((s, l) => s + Math.round(l.quantity * l.unit_price), 0)
@@ -197,6 +202,23 @@ export function OrderCart({
               <p className="text-xs text-gray-500">
                 {formatCurrency(line.unit_price)}{line.unit_label !== 'item' ? `/${line.unit_label}` : ''}
               </p>
+              {/* Waiver badge / button */}
+              {line.waiver_required ? (
+                <span className="inline-flex items-center gap-1 mt-0.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                  <CheckCircle className="h-3 w-3 text-amber-600" />
+                  Waiver added
+                </span>
+              ) : (
+                onWaiverClick && (
+                  <button
+                    onClick={() => onWaiverClick(line.key)}
+                    className="inline-flex items-center gap-1 mt-0.5 text-xs font-medium text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-full px-2 py-0.5 border border-transparent hover:border-amber-200 transition-colors"
+                  >
+                    <AlertTriangle className="h-3 w-3" />
+                    Add waiver
+                  </button>
+                )
+              )}
             </div>
 
             <div className="flex items-center gap-1">

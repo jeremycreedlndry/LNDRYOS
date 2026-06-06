@@ -279,6 +279,14 @@ export interface OrderLine {
   line_total: number
   notes: string | null
   tag_number: string | null
+  // Care-instruction override waiver
+  waiver_required: boolean
+  waiver_text: string | null
+  waiver_token: string | null
+  waiver_token_expires_at: string | null
+  waiver_acknowledged_at: string | null
+  waiver_acknowledged_name: string | null
+  waiver_acknowledged_ip: string | null
 }
 
 // ─── Payments ─────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
-import { router, tenantProcedure } from '../trpc'
+import { router, tenantProcedure, publicProcedure } from '../trpc'
 import { sendEmail, orderCreatedEmail, orderReadyEmail, APP_URL } from '../lib/email'
 import { sendSms, orderCreatedSms, orderReadySms, logMessage } from '../lib/sms'
 import { chargeCardToken } from '../lib/helcim'
@@ -14,6 +14,9 @@ const orderLineInputSchema = z.object({
   unit_label: z.string().default('item'),
   notes: z.string().nullable().optional(),
   tag_number: z.string().nullable().optional(),
+  // Care-instruction override waiver
+  waiver_required: z.boolean().optional().default(false),
+  waiver_text: z.string().nullable().optional(),
 })
 
 const orderStatusSchema = z.enum(['cleaning', 'ready', 'picked_up', 'delivered', 'cancelled', 'pending', 'in_progress'])
@@ -128,19 +131,30 @@ export const ordersRouter = router({
 
       if (orderError) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: orderError.message })
 
-      const lines = input.lines.map((l) => ({
-        order_id: order.id,
-        tenant_id: ctx.tenantId,
-        service_item_id: l.service_item_id ?? null,
-        name: l.name,
-        category: l.category,
-        quantity: l.quantity,
-        unit_price: l.unit_price,
-        unit_label: l.unit_label,
-        line_total: Math.round(l.quantity * l.unit_price),
-        notes: l.notes ?? null,
-        tag_number: l.tag_number ?? null,
-      }))
+      const lines = input.lines.map((l) => {
+        // Generate a waiver token for any line that requires a care-instruction override
+        const waiverToken = l.waiver_required ? crypto.randomUUID() : null
+        const waiverExpiry = waiverToken
+          ? new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() // 2 hours
+          : null
+        return {
+          order_id: order.id,
+          tenant_id: ctx.tenantId,
+          service_item_id: l.service_item_id ?? null,
+          name: l.name,
+          category: l.category,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          unit_label: l.unit_label,
+          line_total: Math.round(l.quantity * l.unit_price),
+          notes: l.notes ?? null,
+          tag_number: l.tag_number ?? null,
+          waiver_required: l.waiver_required ?? false,
+          waiver_text: l.waiver_text ?? null,
+          waiver_token: waiverToken,
+          waiver_token_expires_at: waiverExpiry,
+        }
+      })
 
       const { error: linesError } = await ctx.supabase.from('order_lines').insert(lines)
       if (linesError) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: linesError.message })
@@ -595,6 +609,68 @@ export const ordersRouter = router({
       const { data, error } = await q
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
       return data ?? []
+    }),
+
+  // ── Waivers ─────────────────────────────────────────────────────────────────
+
+  // Fetch waiver lines for an order (used to show QR codes after checkout)
+  getWaiverLines: tenantProcedure
+    .input(z.object({ order_id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('order_lines')
+        .select('id, name, waiver_required, waiver_text, waiver_token, waiver_token_expires_at, waiver_acknowledged_at, waiver_acknowledged_name')
+        .eq('order_id', input.order_id)
+        .eq('tenant_id', ctx.tenantId)
+        .eq('waiver_required', true)
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return data ?? []
+    }),
+
+  // Public — look up a waiver by token (no auth needed; used on customer's phone)
+  getWaiverByToken: publicProcedure
+    .input(z.object({ token: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('order_lines')
+        .select('id, name, waiver_text, waiver_token_expires_at, waiver_acknowledged_at, waiver_acknowledged_name, order:orders(order_number, tenant:tenants(name))')
+        .eq('waiver_token', input.token)
+        .maybeSingle()
+      if (error || !data) throw new TRPCError({ code: 'NOT_FOUND', message: 'Waiver not found' })
+      const expires = data.waiver_token_expires_at ? new Date(data.waiver_token_expires_at) : null
+      if (expires && expires < new Date()) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This waiver link has expired' })
+      return data
+    }),
+
+  // Public — customer submits their name to acknowledge the waiver
+  acknowledgeWaiver: publicProcedure
+    .input(z.object({
+      token: z.string().uuid(),
+      customer_name: z.string().min(1).max(100),
+      ip: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // First verify the token is valid and not already acknowledged
+      const { data: line } = await ctx.supabase
+        .from('order_lines')
+        .select('id, waiver_token_expires_at, waiver_acknowledged_at')
+        .eq('waiver_token', input.token)
+        .maybeSingle()
+      if (!line) throw new TRPCError({ code: 'NOT_FOUND', message: 'Waiver not found' })
+      if (line.waiver_acknowledged_at) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Waiver already signed' })
+      const expires = line.waiver_token_expires_at ? new Date(line.waiver_token_expires_at) : null
+      if (expires && expires < new Date()) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This waiver link has expired' })
+
+      const { error } = await ctx.supabase
+        .from('order_lines')
+        .update({
+          waiver_acknowledged_at:   new Date().toISOString(),
+          waiver_acknowledged_name: input.customer_name,
+          waiver_acknowledged_ip:   input.ip ?? null,
+        })
+        .eq('waiver_token', input.token)
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message })
+      return { ok: true }
     }),
 })
 

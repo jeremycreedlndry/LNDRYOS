@@ -300,7 +300,7 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
   const canDelete = canEdit
 
   type Payment = { id: string; amount: number; method: string; status: string; processed_by: string; processed_at: string }
-  type Line    = { id: string; name: string; category: string; quantity: number; unit_label: string; unit_price: number; notes?: string | null }
+  type Line    = { id: string; name: string; category: string; quantity: number; unit_label: string; unit_price: number; notes?: string | null; waiver_required?: boolean; waiver_text?: string | null; waiver_acknowledged_at?: string | null; waiver_acknowledged_name?: string | null }
   type Assign  = { id: string; assigned_at: string; assigned_by: string | null; duration_minutes: number | null; temperature: string | null; equipment: { id: string; name: string; type: string } }
 
   const payments    = (order?.payments   as Payment[] | undefined) ?? []
@@ -631,6 +631,40 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
               {order.notes && (
                 <Section title="Customer Notes">
                   <p className="text-sm text-gray-700 rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">{order.notes}</p>
+                </Section>
+              )}
+
+              {/* Waivers — only shown if any line has a waiver */}
+              {lines.some((l) => l.waiver_required) && (
+                <Section title="Care Waivers">
+                  <div className="space-y-2">
+                    {lines.filter((l) => l.waiver_required).map((l) => (
+                      <div key={l.id} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-amber-900">{l.name}</p>
+                          {l.waiver_acknowledged_at ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-100 border border-green-200 rounded-full px-2 py-0.5">
+                              ✓ Signed
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5">
+                              ⏳ Awaiting signature
+                            </span>
+                          )}
+                        </div>
+                        {l.waiver_text && (
+                          <p className="text-xs text-amber-800 leading-relaxed">{l.waiver_text}</p>
+                        )}
+                        {l.waiver_acknowledged_at && (
+                          <p className="text-xs text-gray-500">
+                            Signed by <span className="font-medium text-gray-700">{l.waiver_acknowledged_name}</span>
+                            {' · '}
+                            {new Date(l.waiver_acknowledged_at).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </Section>
               )}
 

@@ -20,6 +20,9 @@ import { invoicesRouter } from './routers/invoices'
 import { prepaidCardsRouter } from './routers/prepaidCards'
 import { promoCodesRouter } from './routers/promoCodes'
 import { adminRouter } from './routers/admin'
+import { linenPresetsRouter } from './routers/linenPresets'
+import { stainTrackerRouter } from './routers/stainTracker'
+import { schedulerRouter } from './routers/scheduler'
 
 export const appRouter = router({
   admin: adminRouter,
@@ -43,6 +46,9 @@ export const appRouter = router({
   invoices: invoicesRouter,
   prepaidCards: prepaidCardsRouter,
   promoCodes: promoCodesRouter,
+  linenPresets: linenPresetsRouter,
+  stainTracker: stainTrackerRouter,
+  scheduler: schedulerRouter,
 })
 
 export type AppRouter = typeof appRouter

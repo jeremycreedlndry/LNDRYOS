@@ -15,6 +15,9 @@ import {
   Search,
   FileText,
   Gift,
+  Tag,
+  Droplets,
+  CalendarDays,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ClockWidget } from './ClockWidget'
@@ -35,7 +38,10 @@ const NAV: {
   { href: '/pickups',    label: 'Pickups',     icon: Truck,         permission: 'orders', requestBadge: true },
   { href: '/customers',  label: 'Customers',   icon: Users,         permission: 'customers' },
   { href: '/invoices',   label: 'Invoices',    icon: FileText,      permission: 'manage_invoices' },
-  { href: '/gift-cards', label: 'Gift Cards',  icon: Gift,          permission: 'pos' },
+  { href: '/gift-cards',     label: 'Gift Cards',     icon: Gift, permission: 'pos' },
+  { href: '/bag-out-labels',  label: 'Bag Out Labels',  icon: Tag,      permission: 'orders' },
+  { href: '/stain-tracker',   label: 'Stain Tracker',   icon: Droplets,     permission: 'orders' },
+  { href: '/scheduler',       label: 'Scheduler',       icon: CalendarDays, permission: null },
   { href: '/search',     label: 'Search',      icon: Search,        permission: null },
   { href: '/inbox',      label: 'Inbox',       icon: MessageSquare, permission: null, badge: true },
   { href: '/reports',    label: 'Reports',     icon: BarChart2,     permission: 'reports' },

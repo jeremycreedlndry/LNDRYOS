@@ -30,20 +30,28 @@ export default function LoginPage() {
         .eq('user_id', data.user.id)
         .order('created_at', { ascending: true })
 
-      const ownerMembers = members?.filter((m) => m.role === 'owner') ?? []
+      // If only one membership → use it directly, no guessing needed
+      let member = members?.length === 1 ? members[0] : null
 
-      // Find the owner tenant that has delivery zones — that's the real store
-      let member = null
-      for (const m of ownerMembers) {
-        const { data: zones } = await supabase
-          .from('delivery_zones')
-          .select('id')
-          .eq('tenant_id', m.tenant_id)
-          .limit(1)
-        if (zones && zones.length > 0) { member = m; break }
+      if (!member && members && members.length > 1) {
+        // Multiple tenants (e.g. owner has real store + junk onboarding tenants).
+        // Pick the one with the most orders — that's always the real store.
+        const counts = await Promise.all(
+          members.map(async (m) => {
+            const { count } = await supabase
+              .from('orders')
+              .select('id', { count: 'exact', head: true })
+              .eq('tenant_id', m.tenant_id)
+            return { m, count: count ?? 0 }
+          })
+        )
+        counts.sort((a, b) => b.count - a.count)
+        // Use highest-order-count tenant; fall back to oldest owner, then oldest member
+        const ownerMembers = members.filter((m) => m.role === 'owner')
+        member = counts[0]?.count > 0
+          ? counts[0].m
+          : ownerMembers[0] ?? members[0]
       }
-      // Fall back to oldest owner, then oldest membership
-      member = member ?? ownerMembers[0] ?? members?.[0] ?? null
 
       if (member?.tenant_id) {
         document.cookie = `tenant_id=${member.tenant_id}; path=/; max-age=31536000`

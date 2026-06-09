@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X, CreditCard, Gift } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { trpc } from '@/lib/trpc'
@@ -56,8 +57,8 @@ export function RefundModal({ payment, orderNumber, onClose, onSuccess }: Props)
     })
   }
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl">
 
         {/* Header */}
@@ -176,6 +177,7 @@ export function RefundModal({ payment, orderNumber, onClose, onSuccess }: Props)
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

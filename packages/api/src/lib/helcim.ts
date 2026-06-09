@@ -187,6 +187,27 @@ export async function verifyWithTerminal(params: {
   })
 }
 
+// ─── Refund a card transaction ────────────────────────────────────────────────
+// POST /card-transactions/{transactionId}/refund
+// amount is in dollars (e.g. 49.50), not cents
+
+export async function refundTransaction(params: {
+  transactionId:  string | number
+  amountCents:    number
+  idempotencyKey: string
+}): Promise<HelcimChargeResult> {
+  return helcimFetch<HelcimChargeResult>(
+    `/card-transactions/${params.transactionId}/refund`,
+    {
+      method: 'POST',
+      idempotencyKey: params.idempotencyKey,
+      body: JSON.stringify({
+        amount: +(params.amountCents / 100).toFixed(2),
+      }),
+    }
+  )
+}
+
 // ─── HelcimPay.js initialization ─────────────────────────────────────────────
 
 export interface HelcimPaySession {

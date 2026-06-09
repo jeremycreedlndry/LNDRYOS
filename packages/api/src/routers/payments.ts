@@ -9,6 +9,7 @@ import {
   getTransaction,
   getTransactionByInvoice,
   initializeHelcimPay,
+  refundTransaction,
 } from '../lib/helcim'
 import { chargeCardInternal } from './prepaidCards'
 
@@ -448,5 +449,118 @@ export const paymentsRouter = router({
       })
 
       return { ...payment, remaining_balance_cents: remaining }
+    }),
+
+  // ── Refund a payment ──────────────────────────────────────────────────────
+  // refund_method:
+  //   'return_to_card'  — Helcim API refund back to the original card (card payments only)
+  //   'store_credit'    — add to customer's account_balance (any payment method)
+  refund: tenantProcedure
+    .input(z.object({
+      payment_id:    z.string().uuid(),
+      amount_cents:  z.number().int().positive(),
+      refund_method: z.enum(['return_to_card', 'store_credit']),
+      reason:        z.string().nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Fetch the original payment — must belong to this tenant
+      const { data: payment, error: fetchError } = await ctx.supabase
+        .from('payments')
+        .select('*, order:orders(customer_id)')
+        .eq('id', input.payment_id)
+        .eq('tenant_id', ctx.tenantId)
+        .single()
+
+      if (fetchError || !payment) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Payment not found' })
+      }
+      if (payment.status === 'refunded') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This payment has already been refunded' })
+      }
+      if (input.amount_cents > payment.amount) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Refund amount cannot exceed the original payment' })
+      }
+
+      const testMode = process.env.PAYMENTS_TEST_MODE === 'true'
+      let helcimRefundTxnId: string | null = null
+
+      // ── Return to card (Helcim) ──────────────────────────────────────────
+      if (input.refund_method === 'return_to_card') {
+        const cardMethods = ['card_present', 'card_online', 'saved_card']
+        if (!cardMethods.includes(payment.method)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Return to card is only available for card payments' })
+        }
+        if (!payment.helcim_transaction_id && !testMode) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'No Helcim transaction ID — cannot refund to card automatically' })
+        }
+        if (!testMode) {
+          const result = await refundTransaction({
+            transactionId:  payment.helcim_transaction_id,
+            amountCents:    input.amount_cents,
+            idempotencyKey: `refund-${input.payment_id}-${input.amount_cents}`,
+          })
+          if (!result || String(result.status).toUpperCase() !== 'APPROVED') {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: `Helcim refund declined: ${result?.status ?? 'unknown'}` })
+          }
+          helcimRefundTxnId = String(result.transactionId)
+        } else {
+          helcimRefundTxnId = `TEST-REFUND-${input.payment_id.slice(0, 8)}`
+        }
+      }
+
+      // ── Store credit ─────────────────────────────────────────────────────
+      if (input.refund_method === 'store_credit') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const customerId = (payment.order as any)?.customer_id
+        if (!customerId) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no customer — cannot issue store credit' })
+        }
+        // Increment the customer's account balance
+        const { error: creditError } = await ctx.supabase.rpc('increment_customer_balance', {
+          p_customer_id: customerId,
+          p_amount_cents: input.amount_cents,
+        })
+        // Fallback if the RPC doesn't exist — use a raw update with current value
+        if (creditError) {
+          const { data: cust } = await ctx.supabase
+            .from('customers')
+            .select('account_balance')
+            .eq('id', customerId)
+            .single()
+          const current = (cust?.account_balance ?? 0) as number
+          await ctx.supabase
+            .from('customers')
+            .update({ account_balance: current + input.amount_cents })
+            .eq('id', customerId)
+        }
+      }
+
+      // Mark original payment as refunded if fully refunded
+      if (input.amount_cents >= payment.amount) {
+        await ctx.supabase
+          .from('payments')
+          .update({ status: 'refunded' })
+          .eq('id', input.payment_id)
+      }
+
+      // Insert a refund payment record — trigger will reduce order paid_amount
+      const { data: refundRecord, error: insertError } = await ctx.supabase
+        .from('payments')
+        .insert({
+          tenant_id:             ctx.tenantId,
+          order_id:              payment.order_id,
+          amount:                input.amount_cents,
+          method:                input.refund_method === 'store_credit' ? 'account_credit' : payment.method,
+          status:                'refunded',
+          processed_by:          ctx.userId,
+          refund_of_payment_id:  input.payment_id,
+          helcim_transaction_id: helcimRefundTxnId,
+          notes:                 input.reason ?? null,
+        })
+        .select()
+        .single()
+
+      if (insertError) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: insertError.message })
+      return refundRecord
     }),
 })

@@ -1,13 +1,14 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { X, WashingMachine, Wind, FoldVertical, Mail, Receipt, Send, Trash2, Truck, Pencil, DollarSign, Camera, Plus, ChevronDown } from 'lucide-react'
+import { X, WashingMachine, Wind, FoldVertical, Mail, Receipt, Send, Trash2, Truck, Pencil, DollarSign, Camera, Plus, ChevronDown, RotateCcw } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
 import { formatCurrency, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { CustomerProfilePanel } from '@/components/customers/CustomerProfilePanel'
 import { CancelOrderModal } from '@/components/orders/CancelOrderModal'
+import { RefundModal } from '@/components/orders/RefundModal'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -254,6 +255,7 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
   const [noteText, setNoteText] = useState('')
   const [showCustomerProfile, setShowCustomerProfile] = useState<'orders' | 'edit' | null>(null)
   const [showCancelModal, setShowCancelModal] = useState(false)
+  const [refundPayment, setRefundPayment] = useState<typeof payments[0] | null>(null)
   const [addingStop, setAddingStop] = useState<'pickup' | 'delivery' | null>(null)
   const [stopDate, setStopDate] = useState('')
   const [stopTime, setStopTime] = useState('')
@@ -299,7 +301,7 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
   const isPending = order?.status === 'pending'
   const canDelete = canEdit
 
-  type Payment = { id: string; amount: number; method: string; status: string; processed_by: string; processed_at: string }
+  type Payment = { id: string; amount: number; method: string; status: string; processed_by: string; processed_at: string; helcim_transaction_id?: string | null; refund_of_payment_id?: string | null; notes?: string | null }
   type Line    = { id: string; name: string; category: string; quantity: number; unit_label: string; unit_price: number; notes?: string | null; waiver_required?: boolean; waiver_text?: string | null; waiver_acknowledged_at?: string | null; waiver_acknowledged_name?: string | null }
   type Assign  = { id: string; assigned_at: string; assigned_by: string | null; duration_minutes: number | null; temperature: string | null; equipment: { id: string; name: string; type: string } }
 
@@ -315,6 +317,15 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
 
   return (
     <>
+    {refundPayment && order && (
+        <RefundModal
+          payment={refundPayment}
+          orderNumber={(order as { order_number: string }).order_number}
+          onClose={() => setRefundPayment(null)}
+          onSuccess={() => utils.orders.getById.invalidate({ id: orderId })}
+        />
+      )}
+
     {showCancelModal && order && (
       <CancelOrderModal
         orderId={order.id as string}
@@ -425,19 +436,43 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
                   {payments.length === 0 ? (
                     <p className="text-sm text-amber-600 font-medium">Unpaid</p>
                   ) : (
-                    payments.map((p) => (
-                      <div key={p.id} className="mb-1">
-                        <p className="text-sm text-gray-700">
-                          {formatCurrency(p.amount)} · {METHOD_LABEL[p.method] ?? p.method}
-                        </p>
-                        <p className="text-xs text-gray-400">{fmt(p.processed_at)}</p>
-                        <p className="text-xs text-gray-500">{memberName(p.processed_by)}</p>
-                      </div>
-                    ))
+                    payments.map((p) => {
+                      const isRefund = !!p.refund_of_payment_id || p.status === 'refunded' && !p.refund_of_payment_id === false
+                      const alreadyRefunded = p.status === 'refunded' && !p.refund_of_payment_id
+                      const canRefund = !alreadyRefunded && !p.refund_of_payment_id
+                      return (
+                        <div key={p.id} className="mb-2">
+                          <div className="flex items-start justify-between gap-1">
+                            <div>
+                              <p className={cn('text-sm', p.refund_of_payment_id ? 'text-red-600' : 'text-gray-700')}>
+                                {p.refund_of_payment_id ? '− ' : ''}{formatCurrency(p.amount)} · {METHOD_LABEL[p.method] ?? p.method}
+                                {p.status === 'refunded' && !p.refund_of_payment_id && (
+                                  <span className="ml-1 text-xs text-red-500">(refunded)</span>
+                                )}
+                              </p>
+                              <p className="text-xs text-gray-400">{fmt(p.processed_at)}</p>
+                              <p className="text-xs text-gray-500">{memberName(p.processed_by)}</p>
+                              {p.notes && <p className="text-xs text-gray-400 italic">{p.notes}</p>}
+                            </div>
+                            {canRefund && (
+                              <button
+                                onClick={() => setRefundPayment(p)}
+                                className="shrink-0 text-xs font-medium text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 rounded-full px-2 py-0.5 transition-colors"
+                              >
+                                Refund
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })
                   )}
                   <p className={cn('text-xs font-semibold mt-1',
-                    order.payment_status === 'paid' ? 'text-green-600' : 'text-amber-500')}>
-                    {order.payment_status === 'paid' ? 'Paid in full' : `Unpaid · ${formatCurrency(order.total_amount)}`}
+                    order.payment_status === 'paid' ? 'text-green-600' :
+                    order.payment_status === 'refunded' ? 'text-red-500' : 'text-amber-500')}>
+                    {order.payment_status === 'paid' ? 'Paid in full' :
+                     order.payment_status === 'refunded' ? 'Refunded' :
+                     `Unpaid · ${formatCurrency(order.total_amount)}`}
                   </p>
                 </div>
 

@@ -1113,7 +1113,7 @@ export function CustomerProfilePanel({ customerId, onClose, initialTab }: {
       )}
 
       {/* Backdrop */}
-      <div className="fixed inset-0 z-[70] flex items-stretch justify-end bg-black/40"
+      <div className="fixed inset-0 z-[300] flex items-stretch justify-end bg-black/40"
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
 
         <div className="relative h-full w-full max-w-2xl bg-white shadow-2xl flex flex-col">

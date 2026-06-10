@@ -624,6 +624,7 @@ function POSInner() {
         lines:          cartLines,
         total_amount:   lastCreatedOrder.total_amount,
         paid_amount:    paymentMethod === 'pay_on_collection' ? 0 : lastCreatedOrder.total_amount,
+        payment_method: paymentMethod === 'pay_on_collection' ? 'Balance Due' : paymentMethod === 'cash' ? 'Cash' : paymentMethod === 'card' ? 'Card' : paymentMethod === 'interac' ? 'Interac' : 'Paid',
         tax_rate:       taxRate,
         due_date:       lastCreatedOrder.due_date ?? null,
         notes:          lastCreatedOrder.notes ?? null,

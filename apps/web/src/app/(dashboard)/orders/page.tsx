@@ -1013,7 +1013,13 @@ export default function OrdersPage() {
                   paid_amount:    o.paid_amount,
                   due_date:       o.due_date,
                   notes:          o.notes,
-                  payment_method: o.payment_status === 'paid' ? 'Paid' : 'Balance Due',
+                  payment_method: (() => {
+                    if (o.payment_status !== 'paid') return 'Balance Due'
+                    const methods = (o.payments as Array<{method: string}> | undefined)
+                      ?.map(p => { const m = p.method; return m === 'cash' ? 'Cash' : m === 'card' ? 'Card' : m === 'interac' ? 'Interac' : m })
+                      .filter(Boolean)
+                    return methods?.length ? methods.join(' + ') : 'Paid'
+                  })(),
                 }, {
                   name:       tenantInfo.name,
                   address:    tenantInfo.address?.street ?? null,

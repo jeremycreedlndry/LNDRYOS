@@ -368,43 +368,43 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
     .customer{font-size:16px;font-weight:bold;margin:4px 0 1px}
     .ready{font-size:18px;font-weight:bold;text-align:center;margin:6px 0 2px}
     .sm{font-size:11px}
-    hr{border:none;border-top:1px dashed #000;margin:4px 0}
     table{width:100%;border-collapse:collapse;table-layout:fixed}
     td{padding:1px 2px;vertical-align:top;word-break:break-word}
     td.r{width:18mm;text-align:right;white-space:nowrap}
-    .dash{border-top:1px dashed #000;margin:5px 0}
+    .dash{font-size:11px;letter-spacing:1px;margin:3px 0;overflow:hidden}
     .gap{height:4px}
   </style></head><body>
     <div class="copy">— ${copyLabel} —</div>
     <div class="ordnum">#${data.orderNumber}</div>
     <div class="pieces">${piecesLine}</div>
-    <div class="dash"></div>
+    <div class="dash">--------------------------------</div>
     <div class="store">${data.storeName ?? 'The Laundry Co.'}</div>
     ${data.storeAddress ? `<div class="c sm">${data.storeAddress}</div>` : ''}
     ${data.storeCityPostal ? `<div class="c sm">${data.storeCityPostal}</div>` : ''}
     ${data.storePhone ? `<div class="c sm">Tel: ${data.storePhone}</div>` : ''}
     ${data.staffName ? `<div class="c sm">Served By: ${data.staffName}</div>` : ''}
-    <div class="dash"></div>
+    <div class="dash">--------------------------------</div>
     <div class="customer">${data.customerName || 'Walk-in'}</div>
     ${data.customerAddress ? `<div class="c sm">${data.customerAddress}</div>` : ''}
     ${data.customerPhone ? `<div class="c sm">${data.customerPhone}</div>` : ''}
-    <div class="dash"></div>
+    <div class="dash">--------------------------------</div>
     <table>${lineRows}</table>
-    <div class="dash"></div>
+    <div class="dash">--------------------------------</div>
     <table>
       <tr><td>SUBTOTAL:</td><td class="r">${formatCurrency(data.subtotalCents)}</td></tr>
       ${data.taxCents > 0 ? `<tr><td>${data.taxName ?? 'TAX'}:</td><td class="r">${formatCurrency(data.taxCents)}</td></tr>` : ''}
       <tr class="b"><td>TOTAL:</td><td class="r">${formatCurrency(data.totalCents)}</td></tr>
-      ${balanceDue > 0 ? `<tr class="b"><td>BALANCE DUE:</td><td class="r">${formatCurrency(balanceDue)}</td></tr>` : `<tr><td colspan="2" class="c sm">Paid</td></tr>`}
+      ${balanceDue > 0 ? `<tr class="b"><td>BALANCE DUE:</td><td class="r">${formatCurrency(balanceDue)}</td></tr>` : ''}
     </table>
-    <div class="dash"></div>
+    <div class="sm">Payment: ${data.paymentMethod}</div>
+    <div class="dash">--------------------------------</div>
     ${(data.orderNotes || notes.length > 0) ? `
       <div class="b">Preferences:</div>
       ${data.orderNotes ? data.orderNotes.split(/\r?\n/).map(line => `<div>${line}</div>`).join('') : ''}
       ${notes.map(n => `<div>${n}</div>`).join('')}
-      <div class="dash"></div>` : ''}
+      <div class="dash">--------------------------------</div>` : ''}
     <div class="sm">Dropped Off: ${droppedOff}</div>
-    ${data.readyDate ? `<div class="dash"></div><div class="ready">Ready: ${data.readyDate}</div>` : ''}
+    ${data.readyDate ? `<div class="dash">--------------------------------</div><div class="ready">Ready: ${data.readyDate}</div>` : ''}
     <div class="gap"></div>
     <div class="c sm">Thank you for your business!</div>
     <div class="gap"></div>

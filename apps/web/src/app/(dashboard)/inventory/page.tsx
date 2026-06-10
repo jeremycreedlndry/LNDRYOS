@@ -36,7 +36,7 @@ export default function InventoryPage() {
   }
 
   const role = trpc.staff.myRole.useQuery()
-  const isManager = role.data === 'owner' || role.data === 'manager'
+  const isManager = role.data?.role === 'owner' || role.data?.role === 'manager'
 
   const lowCount = items.filter(i => i.current_stock <= i.low_stock_threshold).length
 

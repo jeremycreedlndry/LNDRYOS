@@ -207,11 +207,7 @@ function parseNotes(lines: ReceiptLine[]): string[] {
   if (!raw) return []
   return raw.split(' · ')
     .map((s) => s.trim())
-    .filter((s) => {
-      if (!s) return false
-      const val = s.split(':').slice(1).join(':').trim()
-      return val && val !== 'undefined' && val !== 'null' && val !== ''
-    })
+    .filter((s) => s && s !== 'undefined' && s !== 'null')
 }
 
 function buildOneCopy(data: ReceiptData, copyLabel: string): string {

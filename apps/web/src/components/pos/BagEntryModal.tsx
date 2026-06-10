@@ -80,9 +80,12 @@ export function BagEntryModal({ item, customerId, onSubmit, onCancel }: Props) {
     const parts = lastOrderPrefs.notesString.split(' · ')
     const result: Record<string, string> = {}
     for (const groupKey of prefGroups) {
+      const label = PREF_GROUP_LABELS[groupKey] ?? groupKey
       const opts = (prefOptions?.[groupKey as keyof OrderPreferenceOptions] as string[] | undefined) ?? []
       for (const part of parts) {
-        if (opts.includes(part)) { result[groupKey] = part; break }
+        // Support both old format ("Value") and new format ("Label: Value")
+        const val = part.startsWith(`${label}: `) ? part.slice(label.length + 2) : part
+        if (opts.includes(val)) { result[groupKey] = val; break }
       }
     }
     if (Object.keys(result).length > 0) setSelectedPrefs(result)
@@ -101,7 +104,7 @@ export function BagEntryModal({ item, customerId, onSubmit, onCancel }: Props) {
     const bagLabel = `· Bag ${bagNum}`
     const prefNote = prefGroups
       .filter((g) => selectedPrefs[g])
-      .map((g) => selectedPrefs[g])
+      .map((g) => `${PREF_GROUP_LABELS[g] ?? g}: ${selectedPrefs[g]}`)
       .join(' · ')
     const bagNotes = [prefNote, isExpress ? 'Express' : '', wetWeight ? 'Wet weight' : '', notes.trim()].filter(Boolean).join(' · ') || undefined
     const baseName = isExpress ? `${item.name} (Express)` : item.name

@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Trash2 } from 'lucide-react'
+import { X, Trash2, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { trpc } from '@/lib/trpc'
+import { CategoryModal } from './CategoryModal'
 import toast from 'react-hot-toast'
 
 const UNITS = ['units', 'bottles', 'bags', 'boxes', 'rolls', 'cases', 'jugs', 'packs', 'sheets', 'litres', 'kg']
@@ -29,6 +30,9 @@ export function ItemModal({ item, categories, onClose, onSuccess }: Props) {
   const [threshold, setThreshold] = useState(String(item?.low_stock_threshold ?? 2))
   const [notes, setNotes]     = useState(item?.notes ?? '')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [showNewCat, setShowNewCat] = useState(false)
+
+  const utils = trpc.useUtils()
 
   const effectiveUnit = unit === '__custom__' ? customUnit : unit
 
@@ -63,6 +67,16 @@ export function ItemModal({ item, categories, onClose, onSuccess }: Props) {
       create.mutate({ ...payload, current_stock: parseInt(stock, 10) || 0 })
     }
   }
+
+  if (showNewCat) return (
+    <CategoryModal
+      onClose={() => setShowNewCat(false)}
+      onSuccess={async () => {
+        await utils.inventory.listCategories.invalidate()
+        setShowNewCat(false)
+      }}
+    />
+  )
 
   return createPortal(
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
@@ -130,7 +144,15 @@ export function ItemModal({ item, categories, onClose, onSuccess }: Props) {
 
           {/* Category */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Category</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">Category</label>
+              <button
+                onClick={() => setShowNewCat(true)}
+                className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 font-medium"
+              >
+                <Plus className="h-3 w-3" /> New category
+              </button>
+            </div>
             <select
               value={catId}
               onChange={e => setCatId(e.target.value)}

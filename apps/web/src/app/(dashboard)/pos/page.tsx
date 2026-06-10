@@ -615,8 +615,9 @@ function POSInner() {
         order_number:   lastCreatedOrder.order_number,
         customer_name:  lastCreatedOrder.customer_name,
         customer_phone: customer?.phone ?? null,
-        lines:          lastCreatedOrder.lines ?? [],
+        lines:          cartLines,
         total_amount:   lastCreatedOrder.total_amount,
+        paid_amount:    lastCreatedOrder.total_amount,
         tax_rate:       taxRate,
         due_date:       lastCreatedOrder.due_date ?? null,
       }, {

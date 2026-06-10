@@ -473,6 +473,7 @@ export async function printReceipt(
     customer_phone?: string | null
     lines: Array<{ name: string; category: string; quantity: number; unit_price: number; unit_label: string; notes?: string | null }>
     total_amount: number
+    paid_amount?: number | null
     tax_rate?: number
     payment_method?: string
     due_date?: string | null
@@ -507,6 +508,7 @@ export async function printReceipt(
     subtotalCents:  subtotal,
     taxCents:       Math.max(0, taxCents),
     totalCents:     order.total_amount,
+    paidCents:      order.paid_amount ?? undefined,
     paymentMethod:  order.payment_method ?? 'Paid',
     storeName:      store?.name,
     storeAddress:   store?.address,

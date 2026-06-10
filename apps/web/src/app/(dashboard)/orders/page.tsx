@@ -1004,6 +1004,7 @@ export default function OrdersPage() {
                     notes: l.notes,
                   })),
                   total_amount:   o.total_amount,
+                  paid_amount:    o.paid_amount,
                   due_date:       o.due_date,
                   payment_method: o.payment_status === 'paid' ? 'Paid' : 'Balance Due',
                 }, {

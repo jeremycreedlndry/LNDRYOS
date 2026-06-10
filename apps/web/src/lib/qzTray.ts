@@ -140,6 +140,7 @@ export async function qzPrintHTML(printerName: string, html: string, sizeMm = 80
     margins: 0,
     orientation: 'portrait',
     colorType: 'grayscale',
+    scaleContent: false,  // don't shrink content to fit — we control sizing in CSS
   })
   await q.print(config, [{ type: 'html', format: 'plain', data: html }])
 }

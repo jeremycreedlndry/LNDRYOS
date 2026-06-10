@@ -357,16 +357,18 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
   const balanceDue = data.totalCents - (data.paidCents ?? 0)
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    @page{size:80mm auto;margin:0}
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:'Courier New',monospace;font-size:13px;width:100%;padding:2px 4px}
+    html,body{width:80mm}
+    body{font-family:'Courier New',monospace;font-size:16px;padding:3px 5px}
     .c{text-align:center} .r{text-align:right} .b{font-weight:bold}
-    .store{font-size:18px;font-weight:bold;text-align:center;margin:4px 0}
-    .customer{font-size:17px;font-weight:bold;text-align:center;margin:6px 0 2px}
-    .ready{font-size:20px;font-weight:bold;text-align:center;margin:8px 0}
-    .sm{font-size:11px} .label{font-size:11px;text-align:center}
-    hr{border:none;border-top:1px dashed #000;margin:5px 0}
-    table{width:100%;border-collapse:collapse} td{padding:1px 2px;vertical-align:top}
-    .gap{height:6px}
+    .store{font-size:22px;font-weight:bold;text-align:center;margin:5px 0}
+    .customer{font-size:21px;font-weight:bold;text-align:center;margin:8px 0 3px}
+    .ready{font-size:26px;font-weight:bold;text-align:center;margin:10px 0}
+    .sm{font-size:13px} .label{font-size:13px;text-align:center}
+    hr{border:none;border-top:1px dashed #000;margin:6px 0}
+    table{width:100%;border-collapse:collapse} td{padding:2px 2px;vertical-align:top}
+    .gap{height:8px}
   </style></head><body>
     <div class="c sm">*** ${copyLabel} ***</div>
     <div class="c b">#${data.orderNumber}</div>

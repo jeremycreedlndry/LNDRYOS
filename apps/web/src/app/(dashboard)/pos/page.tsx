@@ -606,10 +606,8 @@ function POSInner() {
     // Print receipt if receipt printer configured
     const hw = stationHw as Record<string, unknown> | undefined
     const printerCfg = hw?.receipt_printer as Record<string, string> | undefined
-    // Network printers: use IP for raw ESC/POS socket (reliable width). Named printers: use driver name.
-    const receiptPrinter = (printerCfg?.connection === 'network' && printerCfg?.ip)
-      ? printerCfg.ip
-      : printerCfg?.name
+    // Always use the configured printer name — HTML via Windows driver, driver fires auto-cut
+    const receiptPrinter = printerCfg?.name
     if (receiptPrinter && lastCreatedOrder) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ts = tenantSettings as any

@@ -130,7 +130,9 @@ export async function qzPrintRaw(printerName: string, data: string): Promise<voi
 }
 
 /** Print an HTML receipt via QZ Tray — creates a proper GDI job so the Windows driver
- *  auto-cut setting (Document Bottom: Full Cut) fires correctly. */
+ *  auto-cut setting (Document Bottom: Full Cut) fires correctly.
+ *  NOTE: do NOT set scaleContent:false — that switches QZ to raster rendering which
+ *  bypasses the GDI path and the driver's auto-cut never fires. */
 export async function qzPrintHTML(printerName: string, html: string, sizeMm = 72): Promise<void> {
   await qzConnect()
   const q = await getQZ()
@@ -140,7 +142,7 @@ export async function qzPrintHTML(printerName: string, html: string, sizeMm = 72
     margins: 0,
     orientation: 'portrait',
     colorType: 'grayscale',
-    scaleContent: false,  // don't shrink content to fit — we control sizing in CSS
+    // scaleContent defaults to true — keeps GDI path → driver auto-cut fires
   })
   await q.print(config, [{ type: 'html', format: 'plain', data: html }])
 }

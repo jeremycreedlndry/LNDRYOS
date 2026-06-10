@@ -482,6 +482,7 @@ export async function printReceipt(
     address?: string | null
     cityPostal?: string | null
     phone?: string | null
+    taxName?: string | null
   },
   staffName?: string | null,
 ): Promise<void> {
@@ -511,6 +512,7 @@ export async function printReceipt(
     storeAddress:   store?.address,
     storeCityPostal: store?.cityPostal,
     storePhone:     store?.phone,
+    taxName:        store?.taxName ?? undefined,
     staffName,
     readyDate,
   }

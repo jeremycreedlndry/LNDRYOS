@@ -1011,6 +1011,7 @@ export default function OrdersPage() {
                   address:    tenantInfo.address?.street ?? null,
                   cityPostal: cityPostal || null,
                   phone:      tenantInfo.phone ?? null,
+                  taxName:    tenantInfo.taxName ?? 'HST',
                 }),
                 { loading: 'Printing…', success: 'Sent to printer', error: (e: Error) => e.message }
               )

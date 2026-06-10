@@ -608,7 +608,9 @@ function POSInner() {
     const receiptPrinter = (hw?.receipt_printer as Record<string, string> | undefined)?.name
     if (receiptPrinter && lastCreatedOrder) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const addr = (tenantSettings as any)?.address as Record<string, string> | undefined
+      const ts = tenantSettings as any
+      const addr     = ts?.address as Record<string, string> | undefined
+      const settings = ts?.settings as Record<string, unknown> | null
       printReceipt(receiptPrinter, {
         order_number:   lastCreatedOrder.order_number,
         customer_name:  lastCreatedOrder.customer_name,
@@ -618,10 +620,11 @@ function POSInner() {
         tax_rate:       taxRate,
         due_date:       lastCreatedOrder.due_date ?? null,
       }, {
-        name:       tenantSettings?.name as string | undefined,
+        name:       (settings?.store_name as string | undefined) ?? (tenantSettings?.name as string | undefined),
         address:    addr?.street ?? null,
         cityPostal: addr ? [addr.city, addr.postal_code].filter(Boolean).join(', ') : null,
-        phone:      (tenantSettings?.settings as Record<string, unknown> | null)?.phone as string ?? null,
+        phone:      settings?.phone as string ?? null,
+        taxName:    settings?.tax_name as string ?? 'HST',
       }, (myRole as Record<string, unknown> | undefined)?.display_name as string ?? null)
         .catch((e) => console.warn('[receipt print]', e))
     }

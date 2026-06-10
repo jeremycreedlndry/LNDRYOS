@@ -182,10 +182,9 @@ const BOLD_OFF   = ESC + 'E\x00'
 // ESC ! 0x38 = double-height + double-width + bold in one command
 const LARGE_BOLD = ESC + '!\x38'
 const NORMAL     = ESC + '!\x00'
-// Feed + full cut — GS V 0x41 0x00 is standard ESC/POS full cut.
-// Star TSP143 in ESC/POS emulation mode (network) responds to this reliably.
-const FEED6 = ESC + '\x64\x06'            // feed 6 lines before cut
-const CUT   = FEED6 + GS + '\x56\x41\x00' // GS V A 0 = full cut
+// Star TSP143 is Star Line mode — cut command is ESC i (0x1B 0x69), not GS V.
+// Feed 4 lines first so the tear-off area clears the cutter blade.
+const CUT = ESC + '\x64\x04' + ESC + '\x69' // ESC d 4 (feed 4 lines) + ESC i (full cut)
 
 const W = 48  // chars per line on 80mm paper (Star TSP143)
 

@@ -988,8 +988,10 @@ export default function OrdersPage() {
             onPrintReceipt={(o) => {
               const hw = ((tenant?.settings as Record<string, unknown> | null)?.hardware ?? {}) as Record<string, unknown>
               const printerCfg = hw.receipt_printer as Record<string, string> | undefined
-              // Always use printer name — HTML via Windows driver, driver fires auto-cut
-              const printerName = printerCfg?.name
+              // Network printers: use IP → raw Star Line mode (ESC i cut). Named: HTML via driver.
+              const printerName = (printerCfg?.connection === 'network' && printerCfg?.ip)
+                ? printerCfg.ip
+                : printerCfg?.name
               if (!printerName) {
                 toast.error('Receipt printer not configured. Go to Settings → Hardware.')
                 return

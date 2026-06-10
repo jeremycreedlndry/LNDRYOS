@@ -36,6 +36,7 @@ export const ordersRouter = router({
           *,
           customer:customers(id, first_name, last_name, phone, order_preferences, address_street, address_apt, address_city, address_postal_code),
           lines:order_lines(id, name, category, quantity, unit_label, unit_price, notes),
+          payments(id, amount, method),
           assignments:order_equipment_assignments(duration_minutes, temperature, assigned_at, equipment:equipment(id, name, type)),
           loads:order_loads(id, load_number, stage, equipment_id, duration_minutes, temperature, assigned_at, equipment:equipment(id, name, type)),
           issues:order_issues(id),

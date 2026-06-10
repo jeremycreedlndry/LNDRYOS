@@ -615,8 +615,12 @@ function POSInner() {
       const settings = ts?.settings as Record<string, unknown> | null
       printReceipt(receiptPrinter, {
         order_number:   lastCreatedOrder.order_number,
-        customer_name:  lastCreatedOrder.customer_name,
-        customer_phone: customer?.phone ?? null,
+        customer_name:    lastCreatedOrder.customer_name,
+        customer_phone:   customer?.phone ?? null,
+        customer_address: customer ? [
+          [customer.address_street, customer.address_apt].filter(Boolean).join(' '),
+          [customer.address_city, customer.address_postal_code].filter(Boolean).join(', '),
+        ].filter(Boolean).join(', ') || null : null,
         lines:          cartLines,
         total_amount:   lastCreatedOrder.total_amount,
         paid_amount:    paymentMethod === 'pay_on_collection' ? 0 : lastCreatedOrder.total_amount,

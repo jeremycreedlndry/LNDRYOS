@@ -47,6 +47,7 @@ export interface ReceiptData {
   orderNumber: string
   customerName: string
   customerPhone?: string | null
+  customerAddress?: string | null
   lines: ReceiptLine[]
   subtotalCents: number
   taxCents: number
@@ -389,7 +390,8 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
     ${data.staffName ? `<div class="c sm">Served By: ${data.staffName}</div>` : ''}
     <div class="dash"></div>
     <div class="customer">${data.customerName || 'Walk-in'}</div>
-    ${data.customerPhone ? `<div class="sm">${data.customerPhone}</div>` : ''}
+    ${data.customerAddress ? `<div class="c sm">${data.customerAddress}</div>` : ''}
+    ${data.customerPhone ? `<div class="c sm">${data.customerPhone}</div>` : ''}
     <div class="dash"></div>
     <table>${lineRows}</table>
     <div class="dash"></div>
@@ -482,6 +484,7 @@ export async function printReceipt(
     order_number: string
     customer_name?: string | null
     customer_phone?: string | null
+    customer_address?: string | null
     lines: Array<{ name: string; category: string; quantity: number; unit_price: number; unit_label: string; notes?: string | null }>
     total_amount: number
     paid_amount?: number | null
@@ -510,8 +513,9 @@ export async function printReceipt(
 
   const data: ReceiptData = {
     orderNumber:   order.order_number,
-    customerName:  order.customer_name ?? 'Walk-in',
-    customerPhone: order.customer_phone,
+    customerName:    order.customer_name ?? 'Walk-in',
+    customerPhone:   order.customer_phone,
+    customerAddress: order.customer_address,
     lines: order.lines.map((l) => ({
       name: l.name, quantity: l.quantity,
       unitPrice: l.unit_price, unitLabel: l.unit_label,

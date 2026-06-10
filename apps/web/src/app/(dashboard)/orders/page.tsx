@@ -998,8 +998,12 @@ export default function OrdersPage() {
               toast.promise(
                 qzPrintReceipt(printerName, {
                   order_number:   o.order_number,
-                  customer_name:  o.customer ? `${o.customer.first_name} ${o.customer.last_name}` : (o.customer_name ?? null),
-                  customer_phone: o.customer?.phone ?? null,
+                  customer_name:    o.customer ? `${o.customer.first_name} ${o.customer.last_name}` : (o.customer_name ?? null),
+                  customer_phone:   o.customer?.phone ?? null,
+                  customer_address: o.customer ? [
+                    [o.customer.address_street, o.customer.address_apt].filter(Boolean).join(' '),
+                    [o.customer.address_city, o.customer.address_postal_code].filter(Boolean).join(', '),
+                  ].filter(Boolean).join(', ') || null : null,
                   lines:          o.lines.map((l) => ({
                     name: l.name, category: l.category,
                     quantity: l.quantity, unit_price: l.unit_price, unit_label: l.unit_label,

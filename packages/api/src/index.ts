@@ -23,6 +23,7 @@ import { adminRouter } from './routers/admin'
 import { linenPresetsRouter } from './routers/linenPresets'
 import { stainTrackerRouter } from './routers/stainTracker'
 import { schedulerRouter } from './routers/scheduler'
+import { inventoryRouter } from './routers/inventory'
 
 export const appRouter = router({
   admin: adminRouter,
@@ -49,6 +50,7 @@ export const appRouter = router({
   linenPresets: linenPresetsRouter,
   stainTracker: stainTrackerRouter,
   scheduler: schedulerRouter,
+  inventory: inventoryRouter,
 })
 
 export type AppRouter = typeof appRouter

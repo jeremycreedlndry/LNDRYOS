@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { OrderStatus, EquipmentType } from '@laundry/db'
 import toast from 'react-hot-toast'
-import { printBagOutLabels, type LabelSize } from '@/lib/printJobs'
+import { printBagOutLabels, printReceipt as qzPrintReceipt, type LabelSize } from '@/lib/printJobs'
 import { OrderDetailModal } from './OrderDetailModal'
 import { OrderIssuesModal } from '@/components/orders/OrderIssuesModal'
 import { PaymentModal } from '@/components/pos/PaymentModal'
@@ -986,16 +986,31 @@ export default function OrdersPage() {
             onOpenIssues={(o) => setIssuesOrder(o)}
             onOpenPayment={(o) => setPaymentOrder(o)}
             onPrintReceipt={(o) => {
+              const hw = ((tenant?.settings as Record<string, unknown> | null)?.hardware ?? {}) as Record<string, unknown>
+              const printerName = (hw.receipt_printer as Record<string, string> | undefined)?.name
+              if (!printerName) {
+                toast.error('Receipt printer not configured. Go to Settings → Hardware.')
+                return
+              }
+              const cityPostal = [tenantInfo.address?.city, tenantInfo.address?.postal_code].filter(Boolean).join(', ')
               toast.promise(
-                fetch('/api/print/receipt', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ order_id: o.id }),
-                }).then(async (r) => {
-                  if (!r.ok) {
-                    const j = await r.json().catch(() => ({}))
-                    throw new Error((j as { error?: string }).error ?? 'Print failed')
-                  }
+                qzPrintReceipt(printerName, {
+                  order_number:   o.order_number,
+                  customer_name:  o.customer ? `${o.customer.first_name} ${o.customer.last_name}` : (o.customer_name ?? null),
+                  customer_phone: o.customer?.phone ?? null,
+                  lines:          o.lines.map((l) => ({
+                    name: l.name, category: l.category,
+                    quantity: l.quantity, unit_price: l.unit_price, unit_label: l.unit_label,
+                    notes: l.notes,
+                  })),
+                  total_amount:   o.total_amount,
+                  due_date:       o.due_date,
+                  payment_method: o.payment_status === 'paid' ? 'Paid' : 'Balance Due',
+                }, {
+                  name:       tenantInfo.name,
+                  address:    tenantInfo.address?.street ?? null,
+                  cityPostal: cityPostal || null,
+                  phone:      tenantInfo.phone ?? null,
                 }),
                 { loading: 'Printing…', success: 'Sent to printer', error: (e: Error) => e.message }
               )

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { X, WashingMachine, Wind, FoldVertical, Mail, Receipt, Send, Trash2, Truck, Pencil, DollarSign, Camera, Plus, ChevronDown, RotateCcw } from 'lucide-react'
 import { trpc } from '@/lib/trpc'
@@ -334,12 +335,13 @@ export function OrderDetailModal({ orderId, onClose }: Props) {
         onCancelled={onClose}
       />
     )}
-    {showCustomerProfile && order?.customer_id && (
+    {showCustomerProfile && order?.customer_id && createPortal(
       <CustomerProfilePanel
         customerId={order.customer_id as string}
         onClose={() => setShowCustomerProfile(null)}
         initialTab={showCustomerProfile}
-      />
+      />,
+      document.body
     )}
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
       <div className="relative flex w-full max-w-4xl flex-col max-h-[90vh] rounded-2xl bg-white shadow-2xl overflow-hidden">

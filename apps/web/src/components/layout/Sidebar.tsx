@@ -21,6 +21,7 @@ import {
   CalendarDays,
   Wrench,
   ChevronDown,
+  Package,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ClockWidget } from './ClockWidget'
@@ -64,6 +65,7 @@ const NAV: NavEntry[] = [
       { href: '/bag-out-labels', label: 'Bag Out Labels', icon: Tag,         permission: 'orders' },
       { href: '/stain-tracker',  label: 'Stain Tracker',  icon: Droplets,    permission: 'orders' },
       { href: '/scheduler',      label: 'Scheduler',      icon: CalendarDays, permission: null },
+      { href: '/inventory',      label: 'Inventory',      icon: Package,      permission: null },
     ],
   },
   { href: '/search',  label: 'Search',  icon: Search,        permission: null },

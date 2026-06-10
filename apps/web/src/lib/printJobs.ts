@@ -404,7 +404,7 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
       ${notes.map(n => `<div>${n}</div>`).join('')}
       <div class="dash">----------------------------------------</div>` : ''}
     <div class="sm">Dropped Off: ${droppedOff}</div>
-    ${data.readyDate ? `<div class="dash">----------------------------------------</div><div class="ready">Ready: ${data.readyDate}</div>` : ''}
+    ${data.readyDate ? `<div class="dash">----------------------------------------</div><div class="ready">Due: ${data.readyDate}</div>` : ''}
     <div class="gap"></div>
     <div class="c sm">Thank you for your business!</div>
     <div class="gap"></div>
@@ -487,6 +487,7 @@ export async function printReceipt(
     tax_rate?: number
     payment_method?: string
     due_date?: string | null
+    due_time?: string | null
     notes?: string | null
   },
   store?: {
@@ -502,9 +503,18 @@ export async function printReceipt(
   const taxCents = order.total_amount - subtotal
 
   const readyDate = order.due_date
-    ? new Date(order.due_date + 'T12:00:00').toLocaleDateString('en-CA', {
-        weekday: 'short', month: 'numeric', day: 'numeric',
-      })
+    ? (() => {
+        const datePart = new Date(order.due_date + 'T12:00:00').toLocaleDateString('en-CA', {
+          weekday: 'short', month: 'short', day: 'numeric',
+        })
+        if (!order.due_time) return datePart
+        // Format "14:00" → "2:00pm"
+        const [h, m] = order.due_time.split(':').map(Number)
+        const ampm = h >= 12 ? 'pm' : 'am'
+        const h12  = h % 12 || 12
+        const timeStr = m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2,'0')}${ampm}`
+        return `${datePart} ${timeStr}`
+      })()
     : null
 
   const data: ReceiptData = {

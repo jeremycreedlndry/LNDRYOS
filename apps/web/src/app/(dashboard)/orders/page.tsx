@@ -59,6 +59,7 @@ interface OrderRow {
   assignments: EquipmentAssignment[]
   issues: { id: string }[]
   payments?: { id: string; method: string; amount: number }[]
+  pickup_stops?: { id: string; type: string; scheduled_date: string; time_start: string | null; time_end: string | null }[]
 }
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -1013,6 +1014,7 @@ export default function OrdersPage() {
                   total_amount:   o.total_amount,
                   paid_amount:    o.paid_amount,
                   due_date:       o.due_date,
+                  due_time:       o.pickup_stops?.find(s => s.type === 'delivery')?.time_start?.slice(0, 5) ?? null,
                   notes:          o.notes,
                   payment_method: (() => {
                     if (o.payment_status !== 'paid') return 'Balance Due'

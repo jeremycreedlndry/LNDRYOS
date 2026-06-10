@@ -627,6 +627,7 @@ function POSInner() {
         payment_method: paymentMethod === 'pay_on_collection' ? 'Balance Due' : paymentMethod === 'cash' ? 'Cash' : paymentMethod === 'card' ? 'Card' : paymentMethod === 'interac' ? 'Interac' : 'Paid',
         tax_rate:       taxRate,
         due_date:       lastCreatedOrder.due_date ?? null,
+        due_time:       dueTime || deliveryTime || null,
         notes:          lastCreatedOrder.notes ?? null,
       }, {
         name:       (settings?.store_name as string | undefined) ?? (tenantSettings?.name as string | undefined),

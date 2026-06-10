@@ -539,6 +539,29 @@ function PrinterSection({ type, label, description, defaultConnection, station, 
                   <p className="text-xs text-gray-500 mt-2">Bag-out label (ready)</p>
                   <div dangerouslySetInnerHTML={{ __html: buildLabelPreviewHTML(LABEL_SIZE_PRESETS[labelSize] ?? DEFAULT_LABEL_SIZE, true) }} />
                 </div>
+              ) : connection === 'network' ? (
+              <div className="border border-gray-200 rounded bg-white mx-auto p-2" style={{ width: 220, fontFamily: 'Courier New, monospace', fontSize: 11 }}>
+                <div style={{ textAlign: 'center', fontSize: 10 }}>*** Customer Copy ***</div>
+                <div style={{ textAlign: 'center', fontWeight: 'bold' }}>#1234</div>
+                <div style={{ textAlign: 'center', fontSize: 10 }}>8.5 lbs</div>
+                <br/>
+                <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 14 }}>{(tenant?.settings as any)?.store_name ?? tenant?.name ?? 'The LNDRY Co.'}</div>
+                {(tenant?.address as any)?.street && <div style={{ textAlign: 'center', fontSize: 10 }}>{(tenant?.address as any).street}</div>}
+                <br/>
+                <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 13 }}>John Smith</div>
+                <div style={{ textAlign: 'center', fontSize: 10 }}>705-555-1234</div>
+                <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }}/>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Wash &amp; Fold x 8.5</span><span>$21.25</span></div>
+                <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }}/>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>SUBTOTAL:</span><span>$21.25</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>{(tenantSettings?.tax_name as string) ?? 'HST'}:</span><span>$2.76</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}><span>TOTAL:</span><span>$24.01</span></div>
+                <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }}/>
+                <div style={{ textAlign: 'center', fontSize: 10 }}>Dropped Off: 06/10/26</div>
+                <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 15, margin: '6px 0' }}>Ready: Fri, Jun 12</div>
+                <div style={{ textAlign: 'center', fontSize: 10 }}>Thank you for your business!</div>
+                <div style={{ fontSize: 9, color: '#999', textAlign: 'center', marginTop: 6 }}>ESC/POS — network printer</div>
+              </div>
               ) : (
               <div
                 className="border border-gray-200 rounded bg-white mx-auto"

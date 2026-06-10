@@ -987,7 +987,10 @@ export default function OrdersPage() {
             onOpenPayment={(o) => setPaymentOrder(o)}
             onPrintReceipt={(o) => {
               const hw = ((tenant?.settings as Record<string, unknown> | null)?.hardware ?? {}) as Record<string, unknown>
-              const printerName = (hw.receipt_printer as Record<string, string> | undefined)?.name
+              const printerCfg = hw.receipt_printer as Record<string, string> | undefined
+              const printerName = (printerCfg?.connection === 'network' && printerCfg?.ip)
+                ? printerCfg.ip
+                : printerCfg?.name
               if (!printerName) {
                 toast.error('Receipt printer not configured. Go to Settings → Hardware.')
                 return

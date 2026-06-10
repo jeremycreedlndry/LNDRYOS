@@ -131,7 +131,7 @@ export async function qzPrintRaw(printerName: string, data: string): Promise<voi
 
 /** Print an HTML receipt via QZ Tray — creates a proper GDI job so the Windows driver
  *  auto-cut setting (Document Bottom: Full Cut) fires correctly. */
-export async function qzPrintHTML(printerName: string, html: string, sizeMm = 80): Promise<void> {
+export async function qzPrintHTML(printerName: string, html: string, sizeMm = 72): Promise<void> {
   await qzConnect()
   const q = await getQZ()
   const config = q.configs.create(printerName, {

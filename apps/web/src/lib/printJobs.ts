@@ -357,10 +357,10 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
   const balanceDue = data.totalCents - (data.paidCents ?? 0)
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    @page{size:80mm auto;margin:0}
+    @page{size:72mm auto;margin:0}
     *{margin:0;padding:0;box-sizing:border-box}
-    html,body{width:80mm}
-    body{font-family:'Courier New',monospace;font-size:16px;padding:3px 5px}
+    html,body{width:72mm}
+    body{font-family:'Courier New',monospace;font-size:16px;padding:2px 4px}
     .c{text-align:center} .r{text-align:right} .b{font-weight:bold}
     .store{font-size:22px;font-weight:bold;text-align:center;margin:5px 0}
     .customer{font-size:21px;font-weight:bold;text-align:center;margin:8px 0 3px}

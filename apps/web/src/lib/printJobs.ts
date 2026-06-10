@@ -362,50 +362,50 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
     @page{size:64mm auto;margin:0}
     *{margin:0;padding:0;box-sizing:border-box}
     html,body{width:64mm}
-    body{font-family:'Courier New',monospace;font-size:14px;padding:0 2px}
+    body{font-family:Arial,sans-serif;font-size:13px;padding:0 3px}
     .c{text-align:center} .r{text-align:right} .b{font-weight:bold}
-    .store{font-size:18px;font-weight:bold;text-align:center;margin:4px 0}
-    .customer{font-size:17px;font-weight:bold;text-align:center;margin:5px 0 2px}
-    .ready{font-size:20px;font-weight:bold;text-align:center;margin:6px 0}
-    .sm{font-size:12px}
+    .copy{font-size:11px;text-align:center;margin-bottom:2px}
+    .ordnum{font-size:20px;font-weight:bold;text-align:center;margin:2px 0}
+    .pieces{font-size:13px;text-align:center;margin-bottom:4px}
+    .store{font-size:17px;font-weight:bold;text-align:center;margin:4px 0 2px}
+    .customer{font-size:16px;font-weight:bold;margin:4px 0 1px}
+    .ready{font-size:18px;font-weight:bold;text-align:center;margin:6px 0 2px}
+    .sm{font-size:11px}
     hr{border:none;border-top:1px dashed #000;margin:4px 0}
     table{width:100%;border-collapse:collapse;table-layout:fixed}
     td{padding:1px 2px;vertical-align:top;word-break:break-word}
-    td.r{width:17mm;text-align:right;white-space:nowrap}
-    .gap{height:5px}
+    td.r{width:18mm;text-align:right;white-space:nowrap}
+    .gap{height:4px}
   </style></head><body>
-    <div class="c sm">*** ${copyLabel} ***</div>
-    <div class="c b">#${data.orderNumber}</div>
-    <div class="c">${piecesLine}</div>
-    <div class="gap"></div>
+    <div class="copy">— ${copyLabel} —</div>
+    <div class="ordnum">#${data.orderNumber}</div>
+    <div class="pieces">${piecesLine}</div>
+    <hr/>
     <div class="store">${data.storeName ?? 'The Laundry Co.'}</div>
     ${data.storeAddress ? `<div class="c sm">${data.storeAddress}</div>` : ''}
     ${data.storeCityPostal ? `<div class="c sm">${data.storeCityPostal}</div>` : ''}
     ${data.storePhone ? `<div class="c sm">Tel: ${data.storePhone}</div>` : ''}
     ${data.staffName ? `<div class="c sm">Served By: ${data.staffName}</div>` : ''}
-    <div class="gap"></div>
-    <div class="customer">${data.customerName || 'Walk-in'}</div>
-    ${data.customerPhone ? `<div class="c sm">${data.customerPhone}</div>` : ''}
     <hr/>
+    <div class="customer">${data.customerName || 'Walk-in'}</div>
+    ${data.customerPhone ? `<div class="sm">${data.customerPhone}</div>` : ''}
+    <div class="gap"></div>
     <table>${lineRows}</table>
     <hr/>
     <table>
       <tr><td>SUBTOTAL:</td><td class="r">${formatCurrency(data.subtotalCents)}</td></tr>
       ${data.taxCents > 0 ? `<tr><td>${data.taxName ?? 'TAX'}:</td><td class="r">${formatCurrency(data.taxCents)}</td></tr>` : ''}
       <tr class="b"><td>TOTAL:</td><td class="r">${formatCurrency(data.totalCents)}</td></tr>
-      ${balanceDue > 0 ? `<tr class="b"><td>BALANCE DUE:</td><td class="r">${formatCurrency(balanceDue)}</td></tr>` : ''}
+      ${balanceDue > 0 ? `<tr class="b"><td>BALANCE DUE:</td><td class="r">${formatCurrency(balanceDue)}</td></tr>` : `<tr><td colspan="2" class="c sm">Paid</td></tr>`}
     </table>
-    <div class="c gap">${data.paymentMethod}</div>
     <hr/>
-    ${data.orderNotes ? `<div class="sm b">Notes: ${data.orderNotes}</div><div class="gap"></div>` : ''}
-    ${notes.length > 0 ? `
-      <div class="sm">Prefs: ${notes[0]}</div>
-      ${notes.slice(1).map(n => `<div class="sm" style="padding-left:8px">${n}</div>`).join('')}
-      <div class="gap"></div>` : ''}
+    ${data.orderNotes ? data.orderNotes.split(/\r?\n/).map(line => `<div class="sm">${line}</div>`).join('') + '<div class="gap"></div>' : ''}
+    ${notes.length > 0 ? notes.map(n => `<div class="sm">${n}</div>`).join('') + '<div class="gap"></div>' : ''}
     <div class="sm">Dropped Off: ${droppedOff}</div>
-    ${data.readyDate ? `<div class="ready">Ready: ${data.readyDate}</div>` : ''}
+    ${data.readyDate ? `<hr/><div class="ready">Ready: ${data.readyDate}</div>` : ''}
     <div class="gap"></div>
     <div class="c sm">Thank you for your business!</div>
+    <div class="gap"></div>
   </body></html>`
 }
 

@@ -377,19 +377,19 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
     <div class="copy">— ${copyLabel} —</div>
     <div class="ordnum">#${data.orderNumber}</div>
     <div class="pieces">${piecesLine}</div>
-    <div class="dash">--------------------------------</div>
+    <div class="dash">----------------------------------------</div>
     <div class="store">${data.storeName ?? 'The Laundry Co.'}</div>
     ${data.storeAddress ? `<div class="c sm">${data.storeAddress}</div>` : ''}
     ${data.storeCityPostal ? `<div class="c sm">${data.storeCityPostal}</div>` : ''}
     ${data.storePhone ? `<div class="c sm">Tel: ${data.storePhone}</div>` : ''}
     ${data.staffName ? `<div class="c sm">Served By: ${data.staffName}</div>` : ''}
-    <div class="dash">--------------------------------</div>
+    <div class="dash">----------------------------------------</div>
     <div class="customer">${data.customerName || 'Walk-in'}</div>
     ${data.customerAddress ? `<div class="c sm">${data.customerAddress}</div>` : ''}
     ${data.customerPhone ? `<div class="c sm">${data.customerPhone}</div>` : ''}
-    <div class="dash">--------------------------------</div>
+    <div class="dash">----------------------------------------</div>
     <table>${lineRows}</table>
-    <div class="dash">--------------------------------</div>
+    <div class="dash">----------------------------------------</div>
     <table>
       <tr><td>SUBTOTAL:</td><td class="r">${formatCurrency(data.subtotalCents)}</td></tr>
       ${data.taxCents > 0 ? `<tr><td>${data.taxName ?? 'TAX'}:</td><td class="r">${formatCurrency(data.taxCents)}</td></tr>` : ''}
@@ -397,14 +397,14 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
       ${balanceDue > 0 ? `<tr class="b"><td>BALANCE DUE:</td><td class="r">${formatCurrency(balanceDue)}</td></tr>` : ''}
     </table>
     <div class="sm">Payment: ${data.paymentMethod}</div>
-    <div class="dash">--------------------------------</div>
+    <div class="dash">----------------------------------------</div>
     ${(data.orderNotes || notes.length > 0) ? `
       <div class="b">Preferences:</div>
       ${data.orderNotes ? data.orderNotes.split(/\r?\n/).map(line => `<div>${line}</div>`).join('') : ''}
       ${notes.map(n => `<div>${n}</div>`).join('')}
-      <div class="dash">--------------------------------</div>` : ''}
+      <div class="dash">----------------------------------------</div>` : ''}
     <div class="sm">Dropped Off: ${droppedOff}</div>
-    ${data.readyDate ? `<div class="dash">--------------------------------</div><div class="ready">Ready: ${data.readyDate}</div>` : ''}
+    ${data.readyDate ? `<div class="dash">----------------------------------------</div><div class="ready">Ready: ${data.readyDate}</div>` : ''}
     <div class="gap"></div>
     <div class="c sm">Thank you for your business!</div>
     <div class="gap"></div>

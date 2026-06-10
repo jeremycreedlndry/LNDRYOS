@@ -58,6 +58,7 @@ interface OrderRow {
   lines: OrderLine[]
   assignments: EquipmentAssignment[]
   issues: { id: string }[]
+  payments?: { id: string; method: string; amount: number }[]
 }
 
 // ─── Status config ────────────────────────────────────────────────────────────

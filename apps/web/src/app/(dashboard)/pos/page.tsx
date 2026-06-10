@@ -620,6 +620,7 @@ function POSInner() {
         paid_amount:    paymentMethod === 'pay_on_collection' ? 0 : lastCreatedOrder.total_amount,
         tax_rate:       taxRate,
         due_date:       lastCreatedOrder.due_date ?? null,
+        notes:          lastCreatedOrder.notes ?? null,
       }, {
         name:       (settings?.store_name as string | undefined) ?? (tenantSettings?.name as string | undefined),
         address:    addr?.street ?? null,

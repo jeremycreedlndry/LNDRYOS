@@ -1006,6 +1006,7 @@ export default function OrdersPage() {
                   total_amount:   o.total_amount,
                   paid_amount:    o.paid_amount,
                   due_date:       o.due_date,
+                  notes:          o.notes,
                   payment_method: o.payment_status === 'paid' ? 'Paid' : 'Balance Due',
                 }, {
                   name:       tenantInfo.name,

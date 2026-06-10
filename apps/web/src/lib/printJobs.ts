@@ -393,8 +393,9 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
     </table>
     <div class="c gap">${data.paymentMethod}</div>
     <hr/>
+    ${data.orderNotes ? `<div class="sm b">Notes: ${data.orderNotes}</div><div class="gap"></div>` : ''}
     ${notes.length > 0 ? `
-      <div class="sm">Notes: ${notes[0]}</div>
+      <div class="sm">Prefs: ${notes[0]}</div>
       ${notes.slice(1).map(n => `<div class="sm" style="padding-left:8px">${n}</div>`).join('')}
       <div class="gap"></div>` : ''}
     <div class="sm">Dropped Off: ${droppedOff}</div>
@@ -479,6 +480,7 @@ export async function printReceipt(
     tax_rate?: number
     payment_method?: string
     due_date?: string | null
+    notes?: string | null
   },
   store?: {
     name?: string
@@ -517,6 +519,7 @@ export async function printReceipt(
     storeCityPostal: store?.cityPostal,
     storePhone:     store?.phone,
     taxName:        store?.taxName ?? undefined,
+    orderNotes:     order.notes ?? undefined,
     staffName,
     readyDate,
   }

@@ -740,7 +740,7 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
           )}
         </div>
 
-        {/* Notes */}
+        {/* Preferences */}
         <div className="min-w-0">
           {prefNotes && (
             <p className="text-xs text-gray-600 leading-relaxed">{prefNotes}</p>
@@ -906,7 +906,7 @@ function OrderCard({ order, index, onAssign, onViewDetail, onOpenIssues, onOpenP
 function ColHeaders() {
   return (
     <div className="grid grid-cols-[6rem_6rem_11rem_1fr_1fr_7rem_auto] gap-x-4 border-b border-gray-200 bg-gray-50 px-4 py-2">
-      {['#', 'READY BY', 'CUSTOMER', 'ORDER', 'NOTES', 'TOTAL', ''].map((h) => (
+      {['#', 'READY BY', 'CUSTOMER', 'ORDER', 'PREFERENCES', 'TOTAL', ''].map((h) => (
         <p key={h} className="text-xs font-semibold uppercase tracking-wide text-gray-400">{h}</p>
       ))}
     </div>

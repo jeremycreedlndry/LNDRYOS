@@ -399,7 +399,7 @@ export function buildReceiptHTML(data: ReceiptData, copyLabel: string): string {
     </table>
     <div class="dash"></div>
     ${(data.orderNotes || notes.length > 0) ? `
-      <div class="b">Notes:</div>
+      <div class="b">Preferences:</div>
       ${data.orderNotes ? data.orderNotes.split(/\r?\n/).map(line => `<div>${line}</div>`).join('') : ''}
       ${notes.map(n => `<div>${n}</div>`).join('')}
       <div class="dash"></div>` : ''}

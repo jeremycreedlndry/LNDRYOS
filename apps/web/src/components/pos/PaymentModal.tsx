@@ -35,7 +35,7 @@ interface Props {
   promoCodeId?: string
   customer?: Customer | null
   excludeMethods?: Method[]
-  onComplete: () => void
+  onComplete: (method: Method) => void
   onCancel: () => void
 }
 
@@ -311,7 +311,7 @@ export function PaymentModal({ orderId, totalCents, discountCents = 0, promoCode
             <p className="text-3xl font-bold text-yellow-900">{formatCurrency(changeDue)}</p>
           </div>
         )}
-        <Button onClick={onComplete} size="lg" className="w-full">Done</Button>
+        <Button onClick={() => onComplete(method)} size="lg" className="w-full">Done</Button>
       </div>
     )
   }

@@ -577,7 +577,7 @@ function POSInner() {
     }
   }, [customer, cartLines, taxRate, createOrder, updateOrder, createPickupOrder, createStop, isEditMode, editOrderId, orderType, pickupDate, pickupTime, pickupTimeEnd, deliveryDate, deliveryTime, deliveryTimeEnd, dueDate, effectiveDueDate, editOrder]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handlePaymentComplete = useCallback(async () => {
+  const handlePaymentComplete = useCallback(async (paymentMethod?: string) => {
     // Load funds onto any physical gift cards in the order
     const physicalGiftCards = cartLines.filter(
       (l) => l.category === 'gift_card' && l.gift_card_uid
@@ -617,7 +617,7 @@ function POSInner() {
         customer_phone: customer?.phone ?? null,
         lines:          cartLines,
         total_amount:   lastCreatedOrder.total_amount,
-        paid_amount:    lastCreatedOrder.total_amount,
+        paid_amount:    paymentMethod === 'pay_on_collection' ? 0 : lastCreatedOrder.total_amount,
         tax_rate:       taxRate,
         due_date:       lastCreatedOrder.due_date ?? null,
       }, {

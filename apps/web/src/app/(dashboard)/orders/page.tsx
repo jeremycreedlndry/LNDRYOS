@@ -1056,7 +1056,7 @@ export default function OrdersPage() {
               totalCents={paymentOrder.total_amount}
               customer={paymentOrder.customer as import('@laundry/db').Customer | null}
               excludeMethods={['pay_on_collection']}
-              onComplete={() => markPickedUp.mutate({ id: paymentOrder.id, status: 'picked_up' })}
+              onComplete={(_method) => markPickedUp.mutate({ id: paymentOrder.id, status: 'picked_up' })}
               onCancel={() => setPaymentOrder(null)}
             />
           </div>

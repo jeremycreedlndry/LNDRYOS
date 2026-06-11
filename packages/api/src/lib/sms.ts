@@ -19,6 +19,10 @@ export async function logMessage(supabase: any, msg: {
 }
 
 export async function sendSms(to: string, message: string): Promise<void> {
+  // SMS paused until further notice
+  console.log(`[sms] PAUSED — would send to ${to}: ${message}`)
+  return
+
   const apiKey = process.env.QUO_API_KEY
   const from = process.env.QUO_FROM_NUMBER
 

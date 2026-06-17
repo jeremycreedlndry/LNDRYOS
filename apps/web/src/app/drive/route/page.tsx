@@ -74,16 +74,16 @@ function StopRow({ stop, currentUserId, onPress }: {
       className={cn(
         'w-full flex items-center gap-3 px-4 py-3.5 border-b border-gray-100 bg-white active:bg-gray-50 text-left',
         'border-l-4',
-        isPickup ? 'border-l-green-500' : 'border-l-purple-500'
+        isPickup ? 'border-l-blue-500' : 'border-l-purple-500'
       )}
     >
       {/* Type icon */}
       <div className={cn(
         'h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0',
-        isPickup ? 'bg-green-100' : 'bg-purple-100'
+        isPickup ? 'bg-blue-100' : 'bg-purple-100'
       )}>
         {isPickup
-          ? <ArrowUpCircle className="h-6 w-6 text-green-600" />
+          ? <ArrowUpCircle className="h-6 w-6 text-blue-600" />
           : <ArrowDownCircle className="h-6 w-6 text-purple-600" />
         }
       </div>
@@ -93,7 +93,7 @@ function StopRow({ stop, currentUserId, onPress }: {
         <div className="flex items-center gap-2 mb-0.5">
           <span className={cn(
             'text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded',
-            isPickup ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'
+            isPickup ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
           )}>
             {isPickup ? '↑ Pickup' : '↓ Delivery'}
           </span>
